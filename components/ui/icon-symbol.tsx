@@ -18,6 +18,10 @@ const MAPPING = {
   'paperplane.fill': 'send',
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',
+  calendar: 'event',
+  'bell.fill': 'notifications',
+  'gearshape.fill': 'settings',
+  plus: 'add',
 } as IconMapping;
 
 /**

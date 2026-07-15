@@ -36,6 +36,9 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# Uniwind (auto-generated className typings)
+uniwind-types.d.ts
+
 app-example
 
 # generated native folders

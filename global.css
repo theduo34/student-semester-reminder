@@ -1,0 +1,200 @@
+@import "tailwindcss";
+@import "uniwind";
+
+@import "heroui-native/styles";
+
+@source '../node_modules/heroui-native/lib';
+
+@layer theme {
+    /* ============================================================
+     * LIGHT THEME (Default)
+     * ============================================================
+     * Warm off-white paper, not sterile white. Navy blue is the sole
+     * accent — used for active states, links, progress, and focus.
+     * ============================================================ */
+    @variant light {
+        --font-normal: "Roboto-Regular";
+        --font-medium: "Roboto-Medium";
+        --font-semibold: "Roboto-Medium";
+        --font-bold: "Roboto-Bold";
+
+        --radius: 0.625rem;
+
+        /* Base */
+        --background: oklch(97.3% 0.006 256);
+        --foreground: oklch(30.2% 0.057 252);
+
+        /* Surface — cards, list items */
+        --surface: oklch(99.5% 0.003 256);
+        --surface-foreground: oklch(30.2% 0.057 252);
+
+        --surface-secondary: oklch(95.8% 0.013 256);
+        --surface-secondary-foreground: oklch(30.2% 0.057 252);
+
+        --surface-tertiary: oklch(93% 0.018 256);
+        --surface-tertiary-foreground: oklch(30.2% 0.057 252);
+
+        /* Overlay — modals, sheets, the add/edit-activity modals */
+        --overlay: oklch(99.5% 0.003 256);
+        --overlay-foreground: oklch(30.2% 0.057 252);
+
+        /* Muted — secondary text, timestamps, placeholders */
+        --muted: oklch(54.3% 0.047 255);
+
+        /* Default — neutral interactive surfaces (secondary buttons, pills) */
+        --default: oklch(94% 0.013 256);
+        --default-foreground: oklch(30.2% 0.057 252);
+
+        /* Accent — the app's navy blue signature.
+         * Active tab, links, progress bar, selected calendar day, focus ring. */
+        --accent: oklch(50.2% 0.168 258);
+        --accent-foreground: oklch(99% 0.005 256);
+
+        /* Form fields */
+        --field-background: oklch(99.5% 0.003 256);
+        --field-foreground: oklch(30.2% 0.057 252);
+        --field-placeholder: var(--muted);
+        --field-border: oklch(85% 0.016 256);
+
+        /* Priority tokens — match wireframe badges/dots exactly */
+        --critical: oklch(61.8% 0.208 25.7);
+        --critical-foreground: oklch(34.9% 0.138 22.6);
+
+        --important: oklch(75.9% 0.152 65.2);
+        --important-foreground: oklch(41% 0.085 65.2);
+
+        --flexible: oklch(58.9% 0.155 130.5);
+        --flexible-foreground: oklch(36.4% 0.095 130.5);
+
+        --personal: oklch(64.7% 0.129 285.4);
+        --personal-foreground: oklch(38.9% 0.128 285.4);
+
+        /* Status */
+        --success: oklch(65% 0.16 155);
+        --success-foreground: oklch(16.5% 0.01 155);
+
+        --warning: oklch(75% 0.12 75);
+        --warning-foreground: oklch(16.5% 0.01 75);
+
+        /* Danger — form errors, delete actions. Distinct hue from --critical
+         * (which is a priority level, not a system error) even though both
+         * read as "red" — don't collapse these into one token. */
+        --danger: oklch(62% 0.16 22);
+        --danger-foreground: oklch(99% 0 0);
+
+        /* Components */
+        --segment: oklch(96% 0.008 256);
+        --segment-foreground: oklch(30.2% 0.057 252);
+
+        /* Borders & lines */
+        --border: oklch(91.2% 0.022 256);
+        --separator: oklch(84% 0.01 256);
+        --focus: oklch(50.2% 0.168 258);
+        --link: oklch(45% 0.14 258);
+
+        /* Shadows */
+        --surface-shadow:
+                0 2px 4px 0 rgba(20, 40, 80, 0.04), 0 1px 2px 0 rgba(20, 40, 80, 0.05),
+                0 0 1px 0 rgba(20, 40, 80, 0.05);
+        --overlay-shadow:
+                0 4px 16px 0 rgba(20, 40, 80, 0.06), 0 -2px 8px 0 rgba(20, 40, 80, 0.02),
+                0 12px 24px 0 rgba(20, 40, 80, 0.04);
+        --field-shadow:
+                0 1px 3px 0 rgba(20, 40, 80, 0.04), 0 0 1px 0 rgba(20, 40, 80, 0.06);
+
+        --backdrop: oklch(0% 0 0 / 20%);
+    }
+
+    /* ============================================================
+     * DARK THEME
+     * ============================================================
+     * Deep neutral navy-black, not warm — this is a utility app, the
+     * dark theme should read as "night mode," not mood lighting.
+     * ============================================================ */
+    @variant dark {
+        --font-normal: "Roboto-Regular";
+        --font-medium: "Roboto-Medium";
+        --font-semibold: "Roboto-Medium";
+        --font-bold: "Roboto-Bold";
+
+        --radius: 0.625rem;
+
+        --background: oklch(11% 0.014 256);
+        --foreground: oklch(93% 0.01 256);
+
+        --surface: oklch(16% 0.016 256);
+        --surface-foreground: oklch(93% 0.01 256);
+
+        --surface-secondary: oklch(20% 0.018 256);
+        --surface-secondary-foreground: oklch(93% 0.01 256);
+
+        --surface-tertiary: oklch(24% 0.02 256);
+        --surface-tertiary-foreground: oklch(93% 0.01 256);
+
+        --overlay: oklch(17% 0.017 256);
+        --overlay-foreground: oklch(93% 0.01 256);
+
+        --muted: oklch(50% 0.025 256);
+
+        --default: oklch(24% 0.016 256);
+        --default-foreground: oklch(93% 0.01 256);
+
+        --accent: oklch(71.6% 0.16 260.4);
+        --accent-foreground: oklch(11% 0.014 256);
+
+        --field-background: oklch(14% 0.015 256);
+        --field-foreground: oklch(93% 0.01 256);
+        --field-placeholder: var(--muted);
+        --field-border: oklch(28% 0.018 256);
+
+        --critical: oklch(68.2% 0.208 25.7);
+        --critical-foreground: oklch(91.9% 0.026 25.7);
+
+        --important: oklch(80.1% 0.152 65.2);
+        --important-foreground: oklch(91.9% 0.026 65.2);
+
+        --flexible: oklch(65.3% 0.155 130.5);
+        --flexible-foreground: oklch(91.9% 0.026 130.5);
+
+        --personal: oklch(72.3% 0.129 285.4);
+        --personal-foreground: oklch(91.9% 0.026 285.4);
+
+        --success: oklch(70% 0.14 155);
+        --success-foreground: oklch(15% 0.01 155);
+
+        --warning: oklch(80% 0.1 75);
+        --warning-foreground: oklch(15% 0.01 75);
+
+        --danger: oklch(65% 0.14 22);
+        --danger-foreground: oklch(99% 0 0);
+
+        --segment: oklch(27% 0.017 256);
+        --segment-foreground: oklch(93% 0.01 256);
+
+        --border: oklch(24% 0.015 256);
+        --separator: oklch(32% 0.017 256);
+        --focus: oklch(71.6% 0.16 260.4);
+        --link: oklch(68% 0.13 260.4);
+
+        /* Shadows — invisible on dark, subtle inner glow on overlays instead */
+        --surface-shadow: 0 0 0 0 transparent inset;
+        --overlay-shadow: 0 0 1px 0 rgba(150, 180, 230, 0.08) inset;
+        --field-shadow: 0 0 0 0 transparent inset;
+
+        --backdrop: oklch(0% 0 0 / 20%);
+    }
+}
+
+@theme inline {
+    --color-critical: var(--critical);
+    --color-critical-foreground: var(--critical-foreground);
+
+    --color-important: var(--important);
+    --color-important-foreground: var(--important-foreground);
+
+    --color-flexible: var(--flexible);
+    --color-flexible-foreground: var(--flexible-foreground);
+
+    --color-personal: var(--personal);
+    --color-personal-foreground: var(--personal-foreground);
+}
