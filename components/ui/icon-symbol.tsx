@@ -22,6 +22,9 @@ const MAPPING = {
   'bell.fill': 'notifications',
   'gearshape.fill': 'settings',
   plus: 'add',
+  'chevron.left': 'chevron-left',
+  xmark: 'close',
+  ellipsis: 'more-vert',
 } as IconMapping;
 
 /**
