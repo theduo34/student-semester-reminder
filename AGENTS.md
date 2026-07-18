@@ -4,7 +4,7 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
 
 # Student Semester Reminder — student-facing mobile app
 
-Final-year BTech CS project (Koforidua Technical University). Android-first Expo app
+Final-year BTech CS project (Koforidua Technical University). Android + iOS Expo app
 that helps students manage course assignments, quizzes, exams, institutional deadlines,
 and personal tasks within a semester structure, with local push reminders and a live
 dashboard.
@@ -16,11 +16,13 @@ This repo is the STUDENT-FACING MOBILE APP ONLY. A separate Academic Admin web a
 apps share ONE Convex backend; `convex/` in THIS repo is the source of truth for schema
 and functions — the admin repo consumes a copied version for type generation.
 
-Do NOT build semester-publishing or course-catalogue-management UI here. This app only
-READS semesters/courses/institutional events that the admin app has already published
-(`convex/semesters.ts`, `convex/courses.ts`, `convex/alerts.ts` are read-only queries).
-Whether the admin app also needs write mutations on those three tables from this shared
-backend is an open question — not built here yet, see CLAUDE.md.
+Do NOT build semester-publishing, course-catalogue-management, or institutional-
+hierarchy-management (Faculty/Department/Program/academicClass/Division CRUD) UI here.
+This app only READS that data once the admin app has published it
+(`convex/semesters.ts`, `convex/courses.ts`, `convex/alerts.ts`, `convex/
+academicStructure.ts` are all read-only queries). Whether the admin app also needs write
+mutations on those tables from this shared backend is an open question — not built here
+yet, see CLAUDE.md.
 
 ## Tech stack
 
@@ -35,24 +37,67 @@ backend is an open question — not built here yet, see CLAUDE.md.
 - `expo-notifications` for locally-scheduled reminders (channels: critical / important /
   flexible, see priority model below)
 - `expo-calendar` + `react-native-calendars` for calendar view/sync
+- `react-native-keyboard-controller` for keyboard-aware scrolling/dismissal — current
+  Expo-recommended replacement for bare `KeyboardAvoidingView`. Use
+  `components/ui/KeyboardAwareScreen.tsx`, don't wire it up per screen.
 - `@react-native-async-storage/async-storage` for offline cache, a mutation outbox, and
   the client-derived alerts read-state (see "Alerts feed" below) — not yet implemented,
   see `lib/offlineStore.ts`
 
 ## Domain model
 
+### Institutional hierarchy
+
+Institution → Faculty → Department → Program → **academicClass** (Level + Session) →
+Division (optional). A student belongs to exactly one Faculty/Department/Program/Level/
+Session combination, and optionally one Division within it. Entirely Admin-published,
+read-only here (`convex/academicStructure.ts`).
+
+- **Institution** — single row for now (Koforidua Technical University,
+  `emailDomain: "ktu.edu.gh"`). Name and email domain are always read from this row, not
+  hardcoded — `studentProfiles.createProfile` validates the student's institutional
+  email against it, so a wrong/changed domain is a one-row edit, not a code change.
+- **Faculty → Department → Program** — a straight one-parent-each tree.
+- **academicClass** — a resolved Program + Level + Session triple (e.g. "HND Computer
+  Science, Level 200, Regular"). Called `academicClass` everywhere — schema, types,
+  variables, filenames — never the bare word `class`, a reserved identifier in JS/TS.
+  Levels and sessions are derived from real `academicClasses` rows, never hardcoded —
+  not every program has 4 levels or offers both Regular and Weekend.
+- **Division** — optional subdivision (A–E). A class with none simply has zero
+  `divisions` rows — treat "undivided" as a real, common state, not an edge case.
+
+### Academic entities
+
 - **Semester** — the anchor for everything, only one active at a time. Admin-published,
   read-only here.
 - **Course** — Admin-published catalogue entry (courseCode, courseTitle, colourTag,
-  schedule). Read-only here.
+  academicClassId). Read-only here. Admin picks the academicClass directly when
+  creating a course — Faculty/Department are implied, never entered separately.
+- **CourseSection** — one course's schedule (days/time/venue) for one Division, or for
+  the whole class if undivided (`divisionId` absent). Lives on its own table rather than
+  on `courses` or `courseActivities` because schedule varies by Division but activities
+  don't — every student in a class sees the same assignments/exams regardless of which
+  section's schedule they follow. Resolve a student's section by preferring their
+  `divisionId`, falling back to the undivided section.
 - **CourseActivity** — assignments, quizzes, projects, AND exams all live in one entity
-  (`activityType`: `ASSIGNMENT | QUIZ | PROJECT | EXAM`). Owned by this app.
+  (`activityType`: `ASSIGNMENT | QUIZ | PROJECT | EXAM`). Owned by this app, shared
+  across all divisions of a class (see CourseSection above).
 - **SemesterActivity** — Admin-published institutional events (registration, exam
-  periods, campus events). Always CRITICAL priority, non-dismissible. Read-only here.
+  periods, campus events). Always CRITICAL priority, non-dismissible, and
+  institution-wide — confirmed NOT scoped to an academicClass, unlike Course. Read-only
+  here.
 - **PersonalTask** — the student's own tasks, scoped per-student. Owned by this app.
 - **Reminder** — a scheduled local-notification job, tied to any of the above via
   entityId/entityType. Scheduling happens on-device via expo-notifications; the Convex
   row just records what was scheduled so it can be looked up/cancelled.
+- **StudentProfile** — one row per student (Faculty/Department/Program/academicClass/
+  Division + institutional email, index number, phone number), created during
+  onboarding. Its *absence* for the signed-in user is the "needs onboarding" gate state
+  — no separate synced boolean. See CLAUDE.md's Routing section for the full gate
+  sequence. No profile photo field — confirmed scope decision, initials-in-circle avatar
+  stays as the UI, no file storage needed. Faculty/Department/Program are denormalized
+  onto this row even though derivable by walking up from academicClassId — avoids a
+  3-hop join on every dashboard/list query; don't "clean up" that redundancy.
 
 Priority model, three tiers (supersedes any earlier HIGH/MEDIUM/LOW naming — use these
 going forward):
@@ -89,6 +134,17 @@ toggle view for personal tasks.
   reversible, low-stakes.
 - Delete: native `Alert.alert` confirmation — destructive and irreversible, the one case
   that warrants a confirmation dialog by default.
+- Toast vs. inline error: toast (`hooks/use-app-toast.ts`) for action-level outcomes —
+  a submit/login/verification attempt failing or succeeding as a whole. Inline
+  `TextField` errors for per-field validation the user can see and fix without leaving
+  the field (wrong format, passwords don't match). Don't use one where the other
+  belongs.
+- Empty/loading states are real states to design, not dead ends: a screen with no data
+  yet (Home with no activities, a semester still loading) always renders its real shell
+  (header, any summary card) and only swaps the content area — never replaces the whole
+  screen with a blocking message. That's what a dedicated gate screen
+  ((onboarding)'s waiting screen for "no semester") is for; once past the gate, treat
+  "empty" as a normal, common state with its own designed empty-state UI, not an error.
 
 ## Design posture
 
@@ -101,3 +157,21 @@ empty states), apply the standard pattern for that action's risk level rather th
 guessing silently, or ask if genuinely ambiguous. If a wireframe implies a Convex
 capability that doesn't exist yet (new table, field, or function), stop and flag it
 rather than quietly working around it client-side.
+
+## Comment policy
+
+Comments explain non-obvious WHY, never restate WHAT the code already says. No
+comment-per-line narration, no restating a function name in prose above it, no "//
+increment counter" above `i++`. A comment earns its place only if a reader with full
+context would still have a question without it (a genuinely non-obvious tradeoff, a
+workaround for a known library issue, a deliberate scope decision like the
+forgot-password deferral in the auth flow). Default to no comment over a filler one.
+This applies to all code going forward in this project, not just wherever it was first
+written down.
+
+## Keeping these docs current
+
+At the end of every significant pass (new domain concept, schema change, architecture
+shift), update both this file and `CLAUDE.md` before declaring the pass done — not just
+when explicitly asked. Update the section that's now wrong rather than appending a new
+one that contradicts it.
