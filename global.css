@@ -3,7 +3,7 @@
 
 @import "heroui-native/styles";
 
-@source '../node_modules/heroui-native/lib';
+@source './node_modules/heroui-native/lib';
 
 @layer theme {
     /* ============================================================
@@ -198,3 +198,9 @@
     --color-personal: var(--personal);
     --color-personal-foreground: var(--personal-foreground);
 }
+
+/* Spacing uses Tailwind's default 4px-step scale directly (gap-4, px-6, ...) — no
+ * separate spacing tokens, unlike the colors above. The inconsistency problem this app
+ * had wasn't the scale being inadequate, it was different screens picking different
+ * arbitrary steps for the same kind of gap. See CLAUDE.md's spacing convention table
+ * for which step to use where — that table is the source of truth, not a token set. */
