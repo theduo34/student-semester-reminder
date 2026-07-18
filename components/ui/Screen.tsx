@@ -13,7 +13,7 @@ export const SCREEN_HORIZONTAL_PADDING = 16;
 // screen's header is the same height, whatever it contains. Change it here only.
 export const HEADER_CONTENT_HEIGHT = 56;
 
-type ScreenProps = PropsWithChildren<{
+export type ScreenProps = PropsWithChildren<{
   /**
    * Full-bleed header slot (typically AppTopBar). Renders edge-to-edge above the
    * padded content and owns the top safe-area inset itself (its background extends
