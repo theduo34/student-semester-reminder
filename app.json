@@ -1,23 +1,27 @@
 {
   "expo": {
-    "name": "student-semester-reminder",
-    "slug": "student-semester-reminder",
+    "name": "Termio",
+    "slug": "termio",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "studentsemesterreminder",
+    "scheme": "termio",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.termio.app"
     },
     "android": {
+      "package": "com.termio.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0F3D73",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
+      "permissions": ["READ_CALENDAR", "WRITE_CALENDAR"],
+      "softwareKeyboardLayoutMode": "resize",
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
