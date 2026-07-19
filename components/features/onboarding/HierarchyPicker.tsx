@@ -53,7 +53,7 @@ export function HierarchyPicker({
         </Select.Trigger>
         <Select.Portal>
           <Select.Overlay />
-          <Select.Content presentation="popover" width="trigger">
+          <Select.Content presentation="popover" width="trigger" className="rounded-md">
             {options.map((option) => (
               <Select.Item key={option.value} value={option.value} label={option.label} />
             ))}
