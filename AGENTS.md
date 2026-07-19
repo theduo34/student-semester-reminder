@@ -4,10 +4,40 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before 
 
 # Student Semester Reminder — student-facing mobile app
 
-Final-year BTech CS project (Koforidua Technical University). Android + iOS Expo app
-that helps students manage course assignments, quizzes, exams, institutional deadlines,
-and personal tasks within a semester structure, with local push reminders and a live
-dashboard.
+Final-year BTech CS project (Koforidua Technical University). Android + iOS Expo app —
+a REMINDER PLATFORM, not a task manager. Admin publishes the semester structure and
+course catalogue, including every course activity (assignments, quizzes, exams) and
+institutional deadline; students never create those. A student's own creative surface
+is the **personal reminder** — study blocks, prep sessions, life admin, anything they
+want to nudge themselves about, optionally tied to a course for context. Local push
+notifications plus a live dashboard tie it together.
+
+## Security
+
+Every mutation touching a student's own data (personalReminders, reminderPreferences,
+notificationPreferences, studentProfiles) derives the owner from the server-verified
+auth identity (`getAuthUserId(ctx)`), never from a client-supplied id — see
+`convex/personalReminders.ts` for the pattern. A client only ever sees "its own" data
+because the query/mutation refuses to touch anyone else's; that's the actual
+enforcement, not the client only ever asking for its own. Non-negotiable for anything
+new: if a mutation writes to a per-student row, it checks ownership server-side first,
+every time. See CLAUDE.md for the full write-up.
+
+## Demo / seed data
+
+`convex/seed.ts` is the source of demo data for this project — institution, KTU
+hierarchy, courses, activities, and a ready-to-log-in demo student
+(`demo@example.com` / `demo1234`). Run via
+`npx convex run seed:seedAll '{"iAmSure": true}'`; see CLAUDE.md's Backend section for
+the full breakdown and README for the quick-start version. No manual data entry via the
+UI during dev — add to the seed instead. Every seed function is idempotent
+(check-by-natural-key before insert, never delete-then-recreate) — that's the standing
+rule for anything added to this file going forward, not just what's there today. Dates
+in seed data are always relative to `Date.now()`, never hardcoded. Hierarchy facts
+(faculty/department/program names, email domain) are verified against ktu.edu.gh where
+the file's fact-check comment says so; anything not marked verified (the index-number
+format, specifically) is a best guess, flagged rather than presented as fact — course
+codes/titles/activity content are invented example data by design, nothing to verify.
 
 ## Scope boundary — read before building anything
 
@@ -36,7 +66,11 @@ yet, see CLAUDE.md.
   `StyleSheet.create` objects.
 - `expo-notifications` for locally-scheduled reminders (channels: critical / important /
   flexible, see priority model below)
-- `expo-calendar` + `react-native-calendars` for calendar view/sync
+- `expo-calendar` for device-calendar sync; `react-native-calendars` (Wix) is the one
+  calendar UI library for the project — the Calendar tab's month/week grids are a
+  theming/composition job on top of its `Calendar`/`WeekCalendar`/`CalendarProvider`,
+  never a hand-rolled month grid or week strip, and never a second calendar library
+  introduced for a variant look
 - `react-native-keyboard-controller` for keyboard-aware scrolling/dismissal — current
   Expo-recommended replacement for bare `KeyboardAvoidingView`. Use
   `components/ui/KeyboardAwareScreen.tsx`, don't wire it up per screen.
@@ -80,16 +114,34 @@ read-only here (`convex/academicStructure.ts`).
   section's schedule they follow. Resolve a student's section by preferring their
   `divisionId`, falling back to the undivided section.
 - **CourseActivity** — assignments, quizzes, projects, AND exams all live in one entity
-  (`activityType`: `ASSIGNMENT | QUIZ | PROJECT | EXAM`). Owned by this app, shared
-  across all divisions of a class (see CourseSection above).
+  (`activityType`: `ASSIGNMENT | QUIZ | PROJECT | EXAM`). Admin-published and
+  admin-owned, exactly like Course/CourseSection above — students never create or edit
+  these from this app, only read and display them, shared across all divisions of a
+  class (see CourseSection above). `convex/courseActivities.ts`'s `create`/`update`/
+  `remove` mutations predate this clarification and are unauthenticated leftovers from
+  before student-vs-admin ownership was settled — no screen calls them anymore; not
+  removed in this pass, flagged as a cleanup item in CLAUDE.md's open questions.
 - **SemesterActivity** — Admin-published institutional events (registration, exam
   periods, campus events). Always CRITICAL priority, non-dismissible, and
   institution-wide — confirmed NOT scoped to an academicClass, unlike Course. Read-only
   here.
-- **PersonalTask** — the student's own tasks, scoped per-student. Owned by this app.
+- **PersonalReminder** — the student's own reminders and the one thing they actually
+  create in this app: study blocks, prep sessions, life admin, anything they want to
+  nudge themselves about. Optionally tied to a Course for context/colour-coding
+  (validated server-side against the student's own academicClass on every write, never
+  trusted from the client — see Security above). `startTime` is what a notification
+  actually fires against; the optional `endTime` only marks a time-range reminder for
+  display purposes — the range's end is never a second trigger. No sharing/visibility
+  field in this MVP — class-rep sharing between students is a real future want,
+  deliberately not built now, and kept off the schema entirely rather than stubbed, so
+  adding it later is a plain additive migration, not a rename or backfill.
 - **Reminder** — a scheduled local-notification job, tied to any of the above via
   entityId/entityType. Scheduling happens on-device via expo-notifications; the Convex
-  row just records what was scheduled so it can be looked up/cancelled.
+  row just records what was scheduled so it can be looked up/cancelled. Distinct from
+  **reminderPreferences** (per-priority, per-student arrays of minutes-before-due — what
+  Settings' reminder-timing rows edit) and **notificationPreferences** (per-student
+  push/sound/calendar-sync toggles) — those two tables hold the settings that
+  *determine* what gets scheduled, not the scheduled jobs themselves.
 - **StudentProfile** — one row per student (Faculty/Department/Program/academicClass/
   Division + institutional email, index number, phone number), created during
   onboarding. Its *absence* for the signed-in user is the "needs onboarding" gate state
@@ -97,13 +149,65 @@ read-only here (`convex/academicStructure.ts`).
   sequence. No profile photo field — confirmed scope decision, initials-in-circle avatar
   stays as the UI, no file storage needed. Faculty/Department/Program are denormalized
   onto this row even though derivable by walking up from academicClassId — avoids a
-  3-hop join on every dashboard/list query; don't "clean up" that redundancy.
+  3-hop join on every dashboard/list query; don't "clean up" that redundancy. Every
+  field is student-editable after onboarding *except* indexNumber (identity, routes
+  through admin — see "Profile editing" below) — name lives on the auth `users` table,
+  not here, and email there is the separate auth account address, not editable from
+  this app (would need re-verification, out of scope).
+
+## Profile editing — WhatsApp-style, pencil-per-field
+
+`app/(protected)/settings/profile/index.tsx`: large avatar, name, "Joined [date]" up
+top; grouped rows below (ACCOUNT, ACADEMIC) where a row either shows just its value
+(read-only) or its value plus a pencil icon (editable) — never both a value and a
+*disabled* pencil. No global "Edit" button, no edit-mode toggle; the pencil (or its
+absence) is the only signal, so a glance at the screen tells you what's editable
+without tapping anything first. Applies to any future user-editable detail screen, not
+just this one.
+
+- **Single-field edits** (name, phone, institutional email, division) open
+  `components/shared/EditFieldModal.tsx` — one TextField (or a Select when the field is
+  a fixed set, e.g. Division), pre-filled, Save disabled until changed and valid.
+- **Academic hierarchy edits** (Faculty/Department/Program/Level/Session) are
+  cascading, not single-field — see below.
+- **Avatar initials**: first name's first letter + last name's first letter, uppercase,
+  always exactly 1 or 2 characters (`"Kwame Nkrumah Ofori-Atta"` → `"KO"`, not `"KNO"`;
+  a single-word name → its one letter). One helper, `lib/initials.ts`'s `getInitials` —
+  every avatar in the app (Settings, profile detail, Home) calls this, never inlines
+  its own `.charAt(0)`.
+
+### Cascading academic hierarchy edits
+
+Faculty through Session are editable but cascading — correcting one can invalidate
+everything below it (a different Program can have different Levels, different
+Sessions, different Divisions). Tapping the pencil on any of these five fields opens
+`app/edit-academic-details.tsx` with `startingFrom` set to whichever field was tapped,
+reusing `components/features/onboarding/AcademicHierarchyForm.tsx` — the exact same
+cascade Profile Setup uses (`startingFrom` omitted there, since everything is editable
+on first setup). Fields above `startingFrom` render locked (shown, disabled, fixed to
+their current value); `startingFrom` and everything below are live and "sticky" —
+pre-filled from the current value, only clearing downstream once the student actually
+changes something upstream, exactly like Profile Setup's own cascade already did.
+
+Saving a cascading change is consequential — it can move the student to a different
+academicClass, which can orphan personal reminders linked to a course from the old
+one — so Save always goes through a `ConfirmDialog` first
+(`"Confirm academic details change"`), not a direct save. On confirm,
+`studentProfiles.updateAcademicHierarchy` re-validates the whole chain server-side (it
+doesn't trust the client sent a self-consistent set of ids, unlike `createProfile`,
+since this mutation is more consequential) and nulls out — never deletes —
+`personalReminders.courseId` for any reminder whose course no longer belongs to the
+new academicClass. The reminder survives as a standalone one; the student can
+re-attach it or delete it themselves.
+
+Index number stays admin-managed on purpose: self-service edits here are for
+correcting an academic-hierarchy selection mistake, not for identity fields.
 
 Priority model, three tiers (supersedes any earlier HIGH/MEDIUM/LOW naming — use these
 going forward):
 - **Critical** — institutional deadlines, exams. Non-dismissible.
 - **Important** — assignments, quizzes, projects.
-- **Flexible** — personal tasks, lower-stakes course items.
+- **Flexible** — personal reminders, lower-stakes course items.
 
 ## Alerts feed — two different mechanisms, do not conflate
 
@@ -120,20 +224,62 @@ going forward):
 ## Activity details routing
 
 `app/(protected)/activity/[entityId]/index.tsx` is one route with branching render, not
-three separate screens to keep in sync. It accepts an optional `type` query param
-(course | semester | personal) carried from notification payloads or list-item taps, but
-must not trust it blindly — resolve it against a single Convex resolver query that
-checks courseActivities, then semesterActivities, then personalTasks in sequence if the
-param is missing or stale. Render conditionally by the resolved kind: full countdown-card
-for course activities/exams, simpler read-only card for institutional events, lightweight
-toggle view for personal tasks.
+three separate screens to keep in sync — the template for any future "detail screen
+that could show N different entity kinds," not a one-off. It accepts an optional `type`
+query param (course | semester | personal) carried from notification payloads or
+list-item taps, but never trusts it blindly: `convex/activities.ts#resolveById` is a
+single Convex resolver query that checks courseActivities, semesterActivities, and
+personalReminders in sequence via `ctx.db.normalizeId` (the documented Convex mechanism
+for "this id string might belong to one of several tables" — returns null instead of
+throwing when it doesn't decode to that table, which is what makes probing three tables
+safely possible), ownership-checked per kind exactly like every other per-student query
+(see Security above). The client always calls this resolver regardless of what `type`
+says; the param is a hint for notification routing, never the source of truth.
+
+The screen renders one hero section (priority badge + optional course pill + title +
+type sub-line), one countdown card (adapted per kind: hour/minute precision for
+course activities and personal reminders, day-only "All day" framing for semester
+activities, a time-range line when a personal reminder has an `endTime`), one info-row
+list, an optional notes/description card, and a bottom action bar whose content and
+visibility both vary by kind and completion state — not three differently-shaped
+screens. A course activity's "Mark complete" goes through the new, auth-checked
+`courseActivities.updateStatus` mutation (ownership derived from `ctx.auth`, same
+pattern as every other per-student write in this app — the table's older `create`/
+`update`/`remove` mutations predate that pattern and stay unauthenticated leftovers, see
+the open questions below).
+
+## Display integration — unified activity list
+
+Home and Calendar (and eventually Alerts, once it exists — see CLAUDE.md) render
+course activities, personal reminders, and (Calendar only, so far) semester activities
+via the one shared row, `components/shared/ActivityCard.tsx` — never two separate
+sections, never a screen-specific copy of the same row. Colour rule: a course's
+`colourTag` is always the accent when an item is tied to a course — whether it's the
+course activity itself or a personal reminder the student attached to that course —
+with a small "•" shown only on the latter, since that's the one case a same-coloured
+row is actually the student's own to edit. A personal reminder with no course falls
+back to the shared `--personal` token; a semester activity (never tied to a course)
+falls back to `--critical` instead — it's an institutional event, not the student's
+own, so it must never read as the same purple as a personal reminder. Time-range
+reminders (`endTime` present) display as a range ("6:00 – 8:00 PM"); everything else
+shows a single time — don't invent a separate "range" badge/chip for this, the times
+already say it.
+
+Calendar's month/week grid uses a *different*, simpler colour system than
+`ActivityCard`'s per-row accent — every day gets one dot per distinct priority tier
+present (deduplicated, not one dot per activity), and every personal reminder buckets
+as "Personal" there regardless of its own priority field. See CLAUDE.md's Calendar
+section for why the grid's bucket and a row's accent colour aren't the same rule and
+shouldn't be unified.
 
 ## UX conventions
 
 - Mark complete: optimistic update + "Undo" snackbar, no confirmation dialog —
   reversible, low-stakes.
-- Delete: native `Alert.alert` confirmation — destructive and irreversible, the one case
-  that warrants a confirmation dialog by default.
+- Delete (and every other destructive, irreversible action — Log out included):
+  `components/shared/ConfirmDialog.tsx`, never native `Alert.alert` — its OS-default
+  look breaks the app's designed feel. Confirm is styled danger; see CLAUDE.md's
+  "Confirmation & loading patterns" for the component's full contract.
 - Toast vs. inline error: toast (`hooks/use-app-toast.ts`) for action-level outcomes —
   a submit/login/verification attempt failing or succeeding as a whole. Inline
   `TextField` errors for per-field validation the user can see and fix without leaving
@@ -145,6 +291,22 @@ toggle view for personal tasks.
   screen with a blocking message. That's what a dedicated gate screen
   ((onboarding)'s waiting screen for "no semester") is for; once past the gate, treat
   "empty" as a normal, common state with its own designed empty-state UI, not an error.
+- Loading has two distinct treatments, not one: skeleton placeholders for a screen's
+  initial data fetch, inline loading (spinner or disabled state on the specific control)
+  for a user-triggered mutation. Never a centered full-screen spinner for either case.
+  See CLAUDE.md's "Confirmation & loading patterns" for the component-level contract —
+  this applies to every protected screen, not just Settings where it was established.
+- Row helper text (a `ListGroup.ItemDescription`, a settings row's subtitle, etc.) is
+  one short line, no more — if it doesn't fit cleanly on one line, cut it rather than
+  wrapping to two. No trailing period unless it's a genuine multi-sentence stop. If a
+  setting truly needs more explanation than that, the explanation belongs on a detail
+  screen, not stretched across the row.
+- No null rows, no "N/A"/"—" placeholder values: a key-value row (Activity Details'
+  info rows are the current example) is rendered only when it has a real value to show.
+  Missing or inapplicable data means the row is absent from the list entirely, not
+  present with a dash or placeholder string — a row that exists just to say "nothing
+  here" is noise the student has to read past, not information. Applies anywhere a
+  screen builds a variable-length list of key-value rows, not just this one screen.
 
 ## Design posture
 
@@ -157,6 +319,64 @@ empty states), apply the standard pattern for that action's risk level rather th
 guessing silently, or ask if genuinely ambiguous. If a wireframe implies a Convex
 capability that doesn't exist yet (new table, field, or function), stop and flag it
 rather than quietly working around it client-side.
+
+**Library-first, reuse-first** — the default approach for any new UI work, not a
+suggestion to weigh against hand-rolling:
+
+1. Check whether heroui-native already provides the primitive (header, sheet, select,
+   date/time input, toggle, checkbox, ...). Use it directly, or wrap it with the app's
+   token styling — don't rebuild what the library ships.
+2. If heroui-native doesn't cover it, reach for a well-maintained React Native library
+   (checked for current maintenance) before writing custom native-feeling UI from
+   scratch — e.g. `@react-native-community/datetimepicker` for the reminder form's
+   date/time inputs, rather than a hand-rolled picker that behaves differently per
+   platform.
+3. Only build from scratch if neither applies, or the library option genuinely doesn't
+   fit — and say so explicitly when it happens, so the decision reads as deliberate,
+   not reflexive.
+
+**Card border-radius is a shared token, not a per-screen choice**: every card, group,
+modal container, and equivalent rectangular grouped surface uses `rounded-md` (global.
+css's `--radius-md`), applied via `className="rounded-md"` since heroui-native's own
+`Card`/`ListGroup`/`Dialog.Content`/`Select.Content` all default to a much larger
+`rounded-3xl` (they extend the same `Surface` primitive). This is applied per call
+site, not a global CSS override — search for `rounded-md` in any of those components
+before adding a new one to see the pattern. Fully round shapes (an avatar, a pill/badge,
+a circular FAB) are exempt — this rule is about rectangular surfaces only.
+
+**Derived data fed to a third-party list/calendar prop is always memoized off its
+source query data, never recomputed inline in the render body.** `react-native-
+calendars`' `markedDates` is the concrete example (see CLAUDE.md) — recomputing it on
+every render is a known performance sink with that library specifically, but the rule
+itself is general: anything shaped once from query results for a prop like this uses
+`useMemo` keyed on the underlying data, not ad hoc per-render construction.
+
+**Screen horizontal padding is set once, globally, never per nested component.**
+`Screen`'s `SCREEN_HORIZONTAL_PADDING` is the only source of horizontal inset; content
+rendered inside it (including a third-party component's own default padding, e.g.
+`react-native-calendars`' grid) must not add a second layer of `px-*`/margin/internal
+padding on top. Surfaced twice so far — reminder-timing and the Calendar screen's
+month/week grids — see CLAUDE.md's Styling section for the standing rule and the
+Calendar section for the library-specific override.
+
+**A calendar day cell has exactly two highlight states, and today always wins.**
+Today gets the strong filled `--accent` box; the selected day (when not today) gets a
+light `--accent` tint box; both are `--radius-md`, never circular; if a day is both,
+only today's stronger style renders — there's no third "selected + today" look. See
+CLAUDE.md's Calendar section for the exact mechanism.
+
+**Any epoch-ms-to-calendar-day mapping uses the shared `lib/dateKey.ts#toDateKey`
+helper, never a local reimplementation or `toISOString()`.** `toISOString()` is UTC and
+can shift a late-evening local timestamp into the next day, breaking exactly this kind
+of by-day bucketing — see CLAUDE.md's Styling section and the Calendar section's
+bucketing note.
+
+**Never copy component code between two screens.** The moment something is needed a
+second time, it moves to `components/shared/` or `components/ui/` — not "later," not
+"once it's needed a third time." If it's obvious upfront a piece will be reused (a modal
+header every modal will want, a priority selector every activity form will want), it
+starts in shared, first pass. This is what keeps the app from drifting back into the
+per-screen visual inconsistency the auth pass had to clean up.
 
 ## Comment policy
 
