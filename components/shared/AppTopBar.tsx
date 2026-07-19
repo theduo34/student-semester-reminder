@@ -33,6 +33,11 @@ export function AppTopBar({ left, title, titleVariant = 'default', right }: AppT
       <Pressable
         onPress={() => router.back()}
         hitSlop={8}
+        // A bare Pressable gives no visual response to a press by default — the
+        // native back button (settings/profile, reminder-timing) dims on tap, so this
+        // matches that instead of feeling inert. See CLAUDE.md's Back button styling
+        // note for why this is the one place that gets touched, not per-screen.
+        style={({ pressed }) => ({ opacity: pressed ? 0.4 : 1 })}
         accessibilityRole="button"
         accessibilityLabel="Back">
         <IconSymbol name="chevron.left" color={foreground} size={22} />
@@ -43,6 +48,7 @@ export function AppTopBar({ left, title, titleVariant = 'default', right }: AppT
       <Pressable
         onPress={() => router.back()}
         hitSlop={8}
+        style={({ pressed }) => ({ opacity: pressed ? 0.4 : 1 })}
         accessibilityRole="button"
         accessibilityLabel="Close">
         <IconSymbol name="xmark" color={foreground} size={20} />
