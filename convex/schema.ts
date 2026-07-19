@@ -8,10 +8,19 @@ export const priorityValidator = v.union(
   v.literal('FLEXIBLE'),
 );
 export const activityStatusValidator = v.union(v.literal('PENDING'), v.literal('COMPLETED'));
-const entityType = v.union(
+// Shared by `reminders` and `alerts` — both tables reference "which owning table does
+// entityId belong to" and use the same three values (matching the actual table names,
+// not a separate snake_case vocabulary) so there's one entity-kind vocabulary in this
+// schema, not two slightly-differently-spelled ones for two similar-purpose tables.
+export const entityType = v.union(
   v.literal('courseActivities'),
   v.literal('semesterActivities'),
   v.literal('personalReminders'),
+);
+export const alertKindValidator = v.union(
+  v.literal('REMINDER_FIRED'),
+  v.literal('NEW_EVENT'),
+  v.literal('OVERDUE'),
 );
 
 // Shared by academicClasses (defines it) and academicStructure.ts / studentProfiles.ts
@@ -182,6 +191,12 @@ export default defineSchema({
     institutionalEmail: v.string(),
     indexNumber: v.string(),
     phoneNumber: v.string(),
+    // When useAlertsSync last checked semesterActivities for rows to turn into
+    // NEW_EVENT alerts (see convex/alerts.ts and hooks/useAlertsSync.ts) — absence
+    // means "never checked," not "checked at time zero," so the first sync after a
+    // student's profile is created doesn't retroactively alert on the entire existing
+    // catalogue of institutional events.
+    lastSeenAlertsAt: v.optional(v.number()),
   }).index('by_userId', ['userId']),
 
   // Owned by this app. One row per (student, priority) — how far ahead of a due date
@@ -204,4 +219,34 @@ export default defineSchema({
     soundEnabled: v.boolean(),
     calendarSyncEnabled: v.boolean(),
   }).index('by_studentId', ['studentId']),
+
+  // Owned by this app — the Alerts tab's feed. A client-derived log, not real OS push
+  // notifications (see AGENTS.md's Alerts feed section): entries are written by
+  // hooks/useAlertsSync.ts, the one place all three creation points (REMINDER_FIRED,
+  // NEW_EVENT, OVERDUE) live, never scattered across screens. `by_userId_entityId_kind`
+  // exists purely for the dedup check useAlertsSync does before every insert — the same
+  // (user, entity, kind) triple should only ever produce one alert, not one per sync
+  // pass.
+  //
+  // `title`/`subtitle`/`priority` are frozen at creation time, not re-derived from
+  // entityId on every read — a live join across three different tables would go stale
+  // the instant a relative-time message ("due in 3 hours") was created, and would break
+  // outright if the referenced entity is later edited or deleted. Same behavior any
+  // real push notification already has: the content you received is what it said at
+  // send time, not a live view of current state. `priority` is optional — only
+  // REMINDER_FIRED/OVERDUE alerts have one (it colours ActivityCard-style icon wells
+  // the same way ActivityCard/PriorityBadge do); NEW_EVENT has no priority concept.
+  alerts: defineTable({
+    userId: v.id('users'),
+    entityType,
+    entityId: v.string(),
+    kind: alertKindValidator,
+    title: v.string(),
+    subtitle: v.string(),
+    priority: v.optional(priorityValidator),
+    createdAt: v.number(),
+    isRead: v.boolean(),
+  })
+    .index('by_userId', ['userId'])
+    .index('by_userId_entityId_kind', ['userId', 'entityId', 'kind']),
 });

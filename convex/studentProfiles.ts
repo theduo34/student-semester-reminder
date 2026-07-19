@@ -204,3 +204,18 @@ export const updateAcademicHierarchy = mutation({
     }
   },
 });
+
+// Written only by hooks/useAlertsSync.ts, after it finishes checking semesterActivities
+// for rows to turn into NEW_EVENT alerts — marks "caught up to here" so the next sync
+// pass only looks at what's published after this point, not the whole catalogue again.
+export const updateLastSeenAlertsAt = mutation({
+  args: { lastSeenAlertsAt: v.number() },
+  handler: async (ctx, { lastSeenAlertsAt }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) {
+      throw new Error('Not authenticated');
+    }
+    const profile = await requireMyProfile(ctx, userId);
+    await ctx.db.patch(profile._id, { lastSeenAlertsAt });
+  },
+});

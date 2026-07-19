@@ -276,6 +276,22 @@ async function upsertPersonalReminder(ctx: MutationCtx, reminder: PersonalRemind
   await ctx.db.insert('personalReminders', { ...reminder, isCompleted: false });
 }
 
+type AlertSeed = Omit<Doc<'alerts'>, '_id' | '_creationTime'>;
+
+// Mirrors the exact dedup key convex/alerts.ts#create checks (userId, entityId, kind) —
+// deliberately, so a real useAlertsSync pass later can never produce a duplicate of a
+// seeded alert either.
+async function upsertAlert(ctx: MutationCtx, alert: AlertSeed) {
+  const existing = await ctx.db
+    .query('alerts')
+    .withIndex('by_userId_entityId_kind', (q) =>
+      q.eq('userId', alert.userId).eq('entityId', alert.entityId).eq('kind', alert.kind),
+    )
+    .unique();
+  if (existing !== null) return;
+  await ctx.db.insert('alerts', alert);
+}
+
 /* --------------------------------- seed functions ---------------------------------- */
 
 export const seedInstitution = internalMutation({
@@ -717,6 +733,157 @@ export const seedActivities = internalMutation({
   },
 });
 
+// Realistic mix of read/unread across all four Alerts time buckets (Today/Yesterday/
+// This week/Earlier) and all three kinds (REMINDER_FIRED/NEW_EVENT/OVERDUE), so the
+// Alerts tab isn't empty during a defense demo. Placed relative to the START of each
+// bucket's day boundary rather than a fixed offset from `now` — e.g. "2pm yesterday" is
+// always safely inside yesterday's 24h window regardless of what time the seed happens
+// to run at, whereas "3 hours ago" could land in the wrong bucket if run in the small
+// hours of the morning. Alerts are frozen historical records (see convex/schema.ts's
+// alerts table comment) — they don't need to reference an entity whose CURRENT state
+// still matches the alert's claim, only a real entityId so tapping through to Activity
+// Details works.
+export const seedDemoAlerts = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const semester = await requireActiveSemester(ctx);
+    const demoUser = await ctx.db
+      .query('users')
+      .withIndex('email', (q) => q.eq('email', DEMO_STUDENT.authEmail))
+      .unique();
+    if (demoUser === null) {
+      throw new Error('Run seedDemoStudent first');
+    }
+    const { academicClass } = await resolveClass(ctx, DEMO_FACULTY, DEMO_DEPARTMENT, DEMO_PROGRAM, DEMO_LEVEL, DEMO_SESSION);
+
+    const requireCourseActivity = async (courseCode: string, title: string) => {
+      const course = await findCourseByCode(ctx, semester._id, academicClass._id, courseCode);
+      if (course === null) throw new Error(`Run seedCourses first (missing ${courseCode})`);
+      const rows = await ctx.db
+        .query('courseActivities')
+        .withIndex('by_studentId', (q) => q.eq('studentId', demoUser._id))
+        .collect();
+      const activity = rows.find((row) => row.courseId === course._id && row.title === title);
+      if (activity === undefined) throw new Error(`Run seedActivities first (missing ${title})`);
+      return { activity, course };
+    };
+    const requirePersonalReminder = async (title: string) => {
+      const rows = await ctx.db
+        .query('personalReminders')
+        .withIndex('by_userId_and_semesterId', (q) => q.eq('userId', demoUser._id).eq('semesterId', semester._id))
+        .collect();
+      const reminder = rows.find((row) => row.title === title);
+      if (reminder === undefined) throw new Error(`Run seedDemoStudent first (missing reminder ${title})`);
+      return reminder;
+    };
+    const requireSemesterActivity = async (title: string) => {
+      const rows = await ctx.db
+        .query('semesterActivities')
+        .withIndex('by_semesterId', (q) => q.eq('semesterId', semester._id))
+        .collect();
+      const event = rows.find((row) => row.title === title);
+      if (event === undefined) throw new Error(`Run seedActivities first (missing event ${title})`);
+      return event;
+    };
+
+    const now = Date.now();
+    const startToday = (() => {
+      const d = new Date(now);
+      d.setHours(0, 0, 0, 0);
+      return d.getTime();
+    })();
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const HOUR_MS = 60 * 60 * 1000;
+    const todayElapsed = now - startToday;
+    const startYesterday = startToday - DAY_MS;
+    const startWeek = startToday - 7 * DAY_MS;
+
+    const quiz2 = await requireCourseActivity('CS 301', 'Quiz 2');
+    const assignment3 = await requireCourseActivity('CS 305', 'Assignment 3');
+    const portfolioDraft = await requireCourseActivity('CS 320', 'Portfolio Draft');
+    const studySession = await requirePersonalReminder('Study DB Normalization');
+    const dataBundle = await requirePersonalReminder('Buy data bundle');
+    const careerFair = await requireSemesterActivity('Career Fair');
+    const midSemExams = await requireSemesterActivity('Mid-semester exams begin');
+
+    await upsertAlert(ctx, {
+      userId: demoUser._id,
+      entityType: 'courseActivities',
+      entityId: quiz2.activity._id,
+      kind: 'REMINDER_FIRED',
+      title: 'Quiz 2 is due in 3 hours',
+      subtitle: `${quiz2.course.courseCode} — ${quiz2.course.courseTitle}`,
+      priority: 'CRITICAL',
+      createdAt: now - Math.min(20 * 60 * 1000, todayElapsed * 0.1),
+      isRead: false,
+    });
+    await upsertAlert(ctx, {
+      userId: demoUser._id,
+      entityType: 'semesterActivities',
+      entityId: careerFair._id,
+      kind: 'NEW_EVENT',
+      title: 'New institutional event published',
+      subtitle: careerFair.title,
+      createdAt: now - Math.min(45 * 60 * 1000, todayElapsed * 0.2),
+      isRead: false,
+    });
+    await upsertAlert(ctx, {
+      userId: demoUser._id,
+      entityType: 'courseActivities',
+      entityId: assignment3.activity._id,
+      kind: 'OVERDUE',
+      title: 'Assignment 3 is overdue',
+      subtitle: `${assignment3.course.courseCode} — ${assignment3.course.courseTitle}`,
+      priority: 'IMPORTANT',
+      createdAt: now - Math.min(3 * HOUR_MS, todayElapsed * 0.6),
+      isRead: true,
+    });
+    await upsertAlert(ctx, {
+      userId: demoUser._id,
+      entityType: 'personalReminders',
+      entityId: studySession._id,
+      kind: 'REMINDER_FIRED',
+      title: 'Reminder: Study DB Normalization',
+      subtitle: 'CS 301 — Database Systems',
+      priority: 'IMPORTANT',
+      createdAt: startYesterday + 14 * HOUR_MS,
+      isRead: true,
+    });
+    await upsertAlert(ctx, {
+      userId: demoUser._id,
+      entityType: 'courseActivities',
+      entityId: portfolioDraft.activity._id,
+      kind: 'OVERDUE',
+      title: 'Portfolio Draft is overdue',
+      subtitle: `${portfolioDraft.course.courseCode} — ${portfolioDraft.course.courseTitle}`,
+      priority: 'IMPORTANT',
+      createdAt: startWeek + 2 * DAY_MS + 10 * HOUR_MS,
+      isRead: false,
+    });
+    await upsertAlert(ctx, {
+      userId: demoUser._id,
+      entityType: 'semesterActivities',
+      entityId: midSemExams._id,
+      kind: 'NEW_EVENT',
+      title: 'New institutional event published',
+      subtitle: midSemExams.title,
+      createdAt: startWeek + 4 * DAY_MS + 15 * HOUR_MS,
+      isRead: true,
+    });
+    await upsertAlert(ctx, {
+      userId: demoUser._id,
+      entityType: 'personalReminders',
+      entityId: dataBundle._id,
+      kind: 'REMINDER_FIRED',
+      title: 'Reminder: Buy data bundle',
+      subtitle: 'Personal reminder',
+      priority: 'FLEXIBLE',
+      createdAt: startWeek - 3 * DAY_MS,
+      isRead: true,
+    });
+  },
+});
+
 // The single entry point — `npx convex run seed:seedAll '{"iAmSure": true}'`. Convex
 // doesn't expose a reliable, documented way for backend code to detect dev vs.
 // production (there's no built-in environment flag — the community-recommended
@@ -743,6 +910,7 @@ export const seedAll = internalAction({
     await ctx.runMutation(internal.seed.seedCourses, {});
     await ctx.runAction(internal.seed.seedDemoStudent, {});
     await ctx.runMutation(internal.seed.seedActivities, {});
+    await ctx.runMutation(internal.seed.seedDemoAlerts, {});
 
     console.warn(`[seed] Done. Demo login: ${DEMO_STUDENT.authEmail} / ${DEMO_STUDENT.password}`);
   },
