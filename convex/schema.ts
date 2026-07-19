@@ -2,12 +2,16 @@ import { authTables } from '@convex-dev/auth/server';
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 
-const priority = v.union(v.literal('CRITICAL'), v.literal('IMPORTANT'), v.literal('FLEXIBLE'));
-const activityStatus = v.union(v.literal('PENDING'), v.literal('COMPLETED'));
+export const priorityValidator = v.union(
+  v.literal('CRITICAL'),
+  v.literal('IMPORTANT'),
+  v.literal('FLEXIBLE'),
+);
+export const activityStatusValidator = v.union(v.literal('PENDING'), v.literal('COMPLETED'));
 const entityType = v.union(
   v.literal('courseActivities'),
   v.literal('semesterActivities'),
-  v.literal('personalTasks'),
+  v.literal('personalReminders'),
 );
 
 // Shared by academicClasses (defines it) and academicStructure.ts / studentProfiles.ts
@@ -102,8 +106,8 @@ export default defineSchema({
       v.literal('EXAM'),
     ),
     dueDate: v.number(),
-    priority,
-    status: activityStatus,
+    priority: priorityValidator,
+    status: activityStatusValidator,
     notes: v.optional(v.string()),
   })
     .index('by_studentId', ['studentId'])
@@ -119,15 +123,34 @@ export default defineSchema({
     date: v.number(),
   }).index('by_semesterId', ['semesterId']),
 
-  // Owned by this app. The student's own tasks.
-  personalTasks: defineTable({
-    studentId: v.id('users'),
+  // Owned by this app — the student's primary creative surface. This is a REMINDER
+  // platform, not a task manager: students never create courseActivities (admin owns
+  // those, see above), they only ever create personalReminders — study blocks, prep
+  // sessions, life admin, anything they want to nudge themselves about. Optionally tied
+  // to a course for context/colour-coding (validated against the student's own
+  // academicClass on insert, see personalReminders.ts), but never admin-managed.
+  // `userId`, not `studentId` like its sibling tables — deliberate, matches authTables'
+  // own `users` naming directly since this table's ownership model (every query scoped
+  // to the caller's identity, never a client-passed id) is the load-bearing property.
+  // No visibility/sharing field yet (class-rep sharing is a real future want, not built
+  // for this MVP) — kept off the schema entirely rather than stubbed, so adding it later
+  // is a plain additive migration, not a rename.
+  personalReminders: defineTable({
+    userId: v.id('users'),
+    semesterId: v.id('semesters'),
     title: v.string(),
-    dueDate: v.optional(v.number()),
-    priority,
-    status: activityStatus,
-    notes: v.optional(v.string()),
-  }).index('by_studentId', ['studentId']),
+    description: v.optional(v.string()),
+    courseId: v.optional(v.id('courses')),
+    dueDate: v.number(),
+    startTime: v.number(),
+    // If present, this is a time-range reminder (e.g. a study block); if absent, it's a
+    // single-moment reminder. Either way, the actual notification fires relative to
+    // startTime, never endTime — the end is display context for the student ("until
+    // 8pm"), not a second trigger.
+    endTime: v.optional(v.number()),
+    priority: priorityValidator,
+    isCompleted: v.boolean(),
+  }).index('by_userId_and_semesterId', ['userId', 'semesterId']),
 
   // A scheduled local-notification job, tied to any of the entities above via
   // entityId/entityType. Scheduling itself happens on-device via expo-notifications;
@@ -160,4 +183,25 @@ export default defineSchema({
     indexNumber: v.string(),
     phoneNumber: v.string(),
   }).index('by_userId', ['userId']),
+
+  // Owned by this app. One row per (student, priority) — how far ahead of a due date
+  // to fire local reminders for that priority tier. Settings' reminder-timing rows read
+  // and write this; absence of a row for a given priority means "use the shipped
+  // default," not "no reminders" — see DEFAULT_INTERVALS_MINUTES in
+  // lib/reminderIntervals.ts.
+  reminderPreferences: defineTable({
+    studentId: v.id('users'),
+    priority: priorityValidator,
+    intervals: v.array(v.number()),
+  }).index('by_studentId_and_priority', ['studentId', 'priority']),
+
+  // Owned by this app. One row per student for the Settings screen's device-level
+  // toggles (push/sound/calendar sync) — distinct from reminderPreferences above, which
+  // is about per-priority timing, not whether notifications fire at all.
+  notificationPreferences: defineTable({
+    studentId: v.id('users'),
+    pushEnabled: v.boolean(),
+    soundEnabled: v.boolean(),
+    calendarSyncEnabled: v.boolean(),
+  }).index('by_studentId', ['studentId']),
 });

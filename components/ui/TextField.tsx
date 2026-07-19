@@ -1,4 +1,4 @@
-import { Description, FieldError, Input, Label, TextField as HeroTextField } from 'heroui-native';
+import { Description, FieldError, Input, Label, TextArea, TextField as HeroTextField } from 'heroui-native';
 import { useState } from 'react';
 import { Pressable, TextInputProps, View } from 'react-native';
 import { useCSSVariable } from 'uniwind';
@@ -15,6 +15,8 @@ type TextFieldProps = {
   isRequired?: boolean;
   icon?: IconSymbolName;
   secureTextEntry?: boolean;
+  /** Renders heroui's TextArea instead of Input — icon/password-toggle slots don't apply in this mode. */
+  multiline?: boolean;
   autoComplete?: TextInputProps['autoComplete'];
   textContentType?: TextInputProps['textContentType'];
   keyboardType?: TextInputProps['keyboardType'];
@@ -38,6 +40,7 @@ export function TextField({
   isRequired,
   icon,
   secureTextEntry,
+  multiline,
   autoComplete,
   textContentType,
   keyboardType,
@@ -48,9 +51,25 @@ export function TextField({
   const hasLeftIcon = Boolean(icon);
   const isSecure = Boolean(secureTextEntry);
 
-  const inputPaddingClassName = [hasLeftIcon && 'pl-10', isSecure && 'pr-10']
+  const inputPaddingClassName = ['rounded-md', hasLeftIcon && 'pl-10', isSecure && 'pr-10']
     .filter(Boolean)
     .join(' ');
+
+  if (multiline) {
+    return (
+      <HeroTextField isRequired={isRequired} isInvalid={Boolean(errorMessage)}>
+        <Label>{label}</Label>
+        <TextArea
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          className="min-h-24 rounded-md"
+        />
+        {description ? <Description>{description}</Description> : null}
+        {errorMessage ? <FieldError>{errorMessage}</FieldError> : null}
+      </HeroTextField>
+    );
+  }
 
   return (
     <HeroTextField isRequired={isRequired} isInvalid={Boolean(errorMessage)}>

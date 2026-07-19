@@ -1,4 +1,8 @@
-import { Button as HeroButton, Spinner, useThemeColor } from 'heroui-native';
+import { Button as HeroButton, Spinner, ThemeColor, useThemeColor } from 'heroui-native';
+
+import { IconSymbol, IconSymbolName } from '@/components/ui/icon-symbol';
+
+type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'danger-soft';
 
 type ButtonProps = {
   onPress: () => void;
@@ -7,8 +11,23 @@ type ButtonProps = {
   isLoading?: boolean;
   /** Shown in place of `children` while `isLoading` — e.g. "Log in" -> "Logging in…". */
   loadingLabel?: string;
-  variant?: 'primary' | 'secondary' | 'danger' | 'danger-soft';
+  variant?: ButtonVariant;
+  /** Full-width is the default (every form CTA); set false for compact inline use like ConfirmDialog's paired actions. */
+  fullWidth?: boolean;
+  /** Leading icon — e.g. the checkmark on ModalHeader's Save action. Hidden while isLoading (the spinner takes its place). */
+  icon?: IconSymbolName;
+  size?: 'sm' | 'md' | 'lg';
   className?: string;
+};
+
+// Icon (and spinner) color per variant — mirrors heroui's own Button.Label color per
+// variant (see button.styles.ts) since IconSymbol needs an explicit resolved color,
+// unlike Label which themes itself.
+const VARIANT_ICON_COLOR: Record<ButtonVariant, ThemeColor> = {
+  primary: 'accent-foreground',
+  secondary: 'accent-soft-foreground',
+  danger: 'danger-foreground',
+  'danger-soft': 'danger-soft-foreground',
 };
 
 // The one submit button across all five auth screens — see CLAUDE.md. Defaults to
@@ -23,23 +42,30 @@ export function Button({
   isLoading,
   loadingLabel,
   variant = 'primary',
+  fullWidth = true,
+  icon,
+  size,
   className,
 }: ButtonProps) {
-  const accentForeground = useThemeColor('accent-foreground');
+  const iconColor = useThemeColor(VARIANT_ICON_COLOR[variant]);
 
   return (
     <HeroButton
       variant={variant}
+      size={size}
       isDisabled={isDisabled || isLoading}
       onPress={onPress}
-      className={['w-full', className].filter(Boolean).join(' ')}>
+      className={[fullWidth && 'w-full', className].filter(Boolean).join(' ')}>
       {isLoading ? (
         <>
-          <Spinner color={accentForeground} />
+          <Spinner color={iconColor} />
           <HeroButton.Label>{loadingLabel ?? children}</HeroButton.Label>
         </>
       ) : (
-        <HeroButton.Label>{children}</HeroButton.Label>
+        <>
+          {icon ? <IconSymbol name={icon} size={16} color={iconColor} /> : null}
+          <HeroButton.Label>{children}</HeroButton.Label>
+        </>
       )}
     </HeroButton>
   );

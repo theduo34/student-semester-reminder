@@ -30,7 +30,19 @@ const MAPPING = {
   envelope: 'mail-outline',
   lock: 'lock-outline',
   'checkmark.circle.fill': 'check-circle',
+  checkmark: 'check',
   'party.popper': 'celebration',
+  bell: 'notifications-none',
+  'speaker.wave.2': 'volume-up',
+  clock: 'schedule',
+  trash: 'delete-outline',
+  'info.circle': 'info-outline',
+  pencil: 'edit',
+  'exclamationmark.circle.fill': 'error',
+  'exclamationmark.triangle.fill': 'warning',
+  'flag.fill': 'flag',
+  'books.vertical.fill': 'menu-book',
+  link: 'link',
 } as IconMapping;
 
 /**

@@ -10,13 +10,15 @@
 
 import type * as ResendOTP from "../ResendOTP.js";
 import type * as academicStructure from "../academicStructure.js";
+import type * as activities from "../activities.js";
 import type * as alerts from "../alerts.js";
 import type * as auth from "../auth.js";
 import type * as courseActivities from "../courseActivities.js";
 import type * as courseSections from "../courseSections.js";
 import type * as courses from "../courses.js";
 import type * as http from "../http.js";
-import type * as personalTasks from "../personalTasks.js";
+import type * as notificationPreferences from "../notificationPreferences.js";
+import type * as personalReminders from "../personalReminders.js";
 import type * as reminders from "../reminders.js";
 import type * as seed from "../seed.js";
 import type * as semesters from "../semesters.js";
@@ -32,13 +34,15 @@ import type {
 declare const fullApi: ApiFromModules<{
   ResendOTP: typeof ResendOTP;
   academicStructure: typeof academicStructure;
+  activities: typeof activities;
   alerts: typeof alerts;
   auth: typeof auth;
   courseActivities: typeof courseActivities;
   courseSections: typeof courseSections;
   courses: typeof courses;
   http: typeof http;
-  personalTasks: typeof personalTasks;
+  notificationPreferences: typeof notificationPreferences;
+  personalReminders: typeof personalReminders;
   reminders: typeof reminders;
   seed: typeof seed;
   semesters: typeof semesters;
