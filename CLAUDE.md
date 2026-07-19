@@ -71,11 +71,14 @@ longer pending.
   below. Alerts is still the bare placeholder from the auth pass (no alerts-feed
   AsyncStorage infra yet); wiring it up is its own pass, not done here.
 - `app/add-activity.tsx`, `app/edit-activity/[entityId].tsx` — root-level modals
-  (`presentation: "modal"`), reachable from anywhere via the FAB or an edit action. Both
-  are the New/Edit Reminder forms — students only ever create personal reminders, so
-  there's no "course activity" tab here (see AGENTS.md). Both use
-  `components/shared/ModalHeader.tsx` and `components/shared/ReminderForm.tsx`, not
-  `AppTopBar` — see Components below.
+  (`presentation: "fullScreenModal"`, not the card-inset `"modal"` — these read as their
+  own full screen, not a peek at what's behind them; `UIModalPresentationFullScreen` on
+  iOS, no swipe-to-dismiss there, closing is the X button only — Android's `"modal"` was
+  already effectively full-height, so this is a no-op on that platform), reachable from
+  anywhere via the FAB or an edit action. Both are the New/Edit Reminder forms —
+  students only ever create personal reminders, so there's no "course activity" tab
+  here (see AGENTS.md). Both use `components/shared/ModalHeader.tsx` and
+  `components/shared/ReminderForm.tsx`, not `AppTopBar` — see Components below.
 - `app/about.tsx`, `app/edit-academic-details.tsx` — two more root-level modals.
   `about.tsx` is display-only (`ModalHeader` with `onSave` omitted). `edit-academic-
   details.tsx` takes a `startingFrom` param and nests a `ConfirmDialog` before saving —
@@ -106,7 +109,68 @@ being forced to match. `settings/profile/index` follows the same native-header p
 (static title set in `app/(protected)/_layout.tsx` this time, no per-screen
 `<Stack.Screen>` override needed since it doesn't change).
 
+**Back button styling** — the native platform header (see above) is the standard for
+any screen with a back button; `activity/[entityId]` was converted to it during the
+Home pass (previously the one screen still on `AppTopBar`'s custom back button) so
+`reminder-timing/[priority]`, `settings/profile`, and `activity/[entityId]` all now
+share the same OS-rendered back button/gesture/title placement, nothing in app code to
+keep in sync between them. `activity/[entityId]`'s three-dot menu (personal reminders
+only) rides along via a local `<Stack.Screen options={{ headerRight: ... }} />`
+rendered inside the route component itself — the only way to make a native header's
+right slot reactive to component state, since the header options registered in
+`app/(protected)/_layout.tsx` are static. `AppTopBar`'s own `left="back"`/`left="close"`
+(`Pressable` + `IconSymbol`, `chevron.left`/`xmark`) is still used by modals and
+`(auth)/verify-email` — those aren't native-stack screens (modals are their own
+presentation, verify-email is pre-auth), so there's no native header to convert them
+to. Its `Pressable` now dims on press (`opacity: pressed ? 0.4 : 1`) to match the native
+button's own tap feedback, since a bare `Pressable` gives no visual response by default.
+
+### Home (`app/(protected)/(tabs)/index.tsx`)
+
+Three time-derived sections — Overdue, Today's schedule, Upcoming this week — merged
+from the same three sources Calendar uses (`courseActivities.listForStudent`,
+`personalReminders.listMine`, `alerts.listBySemester`), computed relative to a `now`
+that's refreshed on screen focus and every 60s while focused (`useFocusEffect` +
+`setInterval`) rather than captured once at mount — otherwise "Today" silently goes
+stale if the student leaves the app open past midnight. Buckets are non-overlapping,
+priority order Overdue > Today > Upcoming: an item due today whose time has already
+passed counts as Overdue, not both.
+
+**Section limits** (display rules, not arbitrary — matches the wireframe): Overdue
+shows max **1**, Today's schedule max **3**, Upcoming this week max **2**. Past the
+limit, the section header's count number is replaced by a "View all →" link
+(`text-accent`) that deep-links to Calendar with query params seeding its initial
+state — see the Calendar section below:
+
+- Overdue → `{ view: 'month' }` (no `date` — the student browses to find it)
+- Today's schedule → `{ view: 'month', date: todayKey }`
+- Upcoming this week → `{ view: 'week' }`
+
+**Section empty states** — Overdue is the only section that can disappear entirely
+(no header, nothing rendered) when there's nothing overdue; Today's schedule and
+Upcoming this week always render their header, even when empty, with a one-line muted
+placeholder ("Nothing on your plate today." / "No activities coming up this week.")
+instead of the section vanishing — so the student can tell the app checked, not that it
+silently failed to load. Only when all three are empty does the screen swap to
+Wireframe_11's full-screen "You're all caught up" state (confetti icon, `Add your first
+activity` button pushing `/add-activity` — a second entry point to the same modal the
+FAB opens).
+
+`HomeHeader` renders as soon as `viewer` resolves, independent of the three activity
+queries — Screen's `header` slot isn't gated behind `isLoading`, so the header (and its
+now-tappable `Avatar`, pushing `/settings/profile`) appears immediately while the body
+below still shows `HomeSkeleton`.
+
 ### Calendar (`app/(protected)/(tabs)/calendar/index.tsx`)
+
+Accepts optional `date` (`YYYY-MM-DD`, the app-wide `toDateKey` format) and `view`
+(`"month" | "week"`) query params for external deep-linking — Home's "View all" links
+are the first caller. Two `useEffect`s (not a `useState` initializer) apply them
+whenever present, because Expo Router's tab navigator keeps this screen mounted across
+tab switches — a second navigation here with different params while already mounted
+wouldn't re-run an initializer, only an effect watching the param values. Absent params
+leave whatever's already selected untouched (today / month, or wherever the student
+last left it).
 
 `react-native-calendars` (Wix) is the one calendar UI library for this project — see
 AGENTS.md. Month view is `<Calendar/>`; Week view is `<WeekCalendar/>`, which requires a
@@ -213,6 +277,47 @@ day just reads `activitiesByDay.get(selectedDate)` for the agenda list below —
 separate "scroll to this day" logic, since the agenda is a filtered view for one day,
 not a running list.
 
+### Alerts (`app/(protected)/(tabs)/alerts/index.tsx`)
+
+See AGENTS.md's Alerts feed section for the three kinds and where each gets created
+(`hooks/useAlertsSync.ts`, wired once at `app/_layout.tsx`'s `RootNavigator` — not
+per-screen). This section covers the screen/component side.
+
+**Time buckets** — `bucketAlerts` groups `api.alerts.listMine`'s results by `createdAt`:
+Today (`>= start of today`), Yesterday (`>= start of yesterday, < today`), This week
+(`>= 7 days back, < yesterday`), Earlier (everything else). A bucket with zero alerts
+is dropped from the rendered list entirely — never an empty section header sitting
+above nothing. `startOfLocalDay`-anchored boundaries, same local-timezone convention as
+`lib/dateKey.ts#toDateKey` elsewhere, just not routed through that specific helper
+since it needs day *boundaries* here, not a lookup key.
+
+**`AlertCard`** (`components/features/alerts/AlertCard.tsx`) — same square icon-well
+shape as `ActivityCard`, coloured by kind: `REMINDER_FIRED` uses the alert's own frozen
+`priority` field (same priority-token pairing as `ActivityCard`/`PriorityBadge`);
+`NEW_EVENT` is a fixed accent tint (institutional news reads as neutral-good, not a
+priority level); `OVERDUE` is always critical. Unread state: `border-accent/25` +
+`bg-accent/5` tint plus a small solid accent dot at the top-right corner; read state is
+the plain `border-border`/`bg-surface` card every other surface in this app uses.
+Swipe-left-to-reveal-delete via `react-native-gesture-handler`'s `Swipeable` (already a
+project dependency — no new library installed for this) with `onSwipeableOpen` doubling
+as the "swipe past threshold auto-deletes" behavior; the revealed action button covers
+the "didn't swipe far enough, tap to confirm" case. No `ConfirmDialog` for this single-
+item delete — see AGENTS.md's standing rule on that. Wrapped in `Animated.View` with a
+`FadeOut` exit so a deleted card animates away instead of just vanishing.
+
+**Header** — `AppTopBar`'s `right` slot took two side-by-side items here ("Mark all
+read" text link + the three-dot menu) for the first time; no change to `AppTopBar`
+itself was needed — `right` already accepts arbitrary `ReactNode`, so the screen just
+passes a `flex-row` `View` wrapping both. "Mark all read" stays visible (not hidden)
+and just dims/disables when there are zero unread alerts, rather than shifting the
+header's layout depending on state. The three-dot menu (`ActionSheet`, reused from
+Activity Details) holds "Clear all alerts" — the one action here that *does* go through
+`ConfirmDialog`, since it's bulk and irreversible.
+
+**Empty state** — soft `accent-soft` circle behind a bell icon, "You're all up to
+date," no CTA (there's nothing for the student to do to produce alerts — a good state,
+not a dead end). Shown only when `listMine` returns zero rows.
+
 ### Onboarding gate (`hooks/use-auth-gate.ts`)
 
 One hook owns the entire redirect decision; `app/_layout.tsx` and every group's
@@ -312,7 +417,9 @@ repo — see `AGENTS.md`). Auth tables come from `@convex-dev/auth`'s `authTable
   of ids, unlike `createProfile`, since moving a student to a different academicClass is
   more consequential; also nulls out — never deletes — any `personalReminders.courseId`
   that no longer belongs to the new academicClass. See AGENTS.md's Profile editing
-  section for the full picture).
+  section for the full picture). `updateLastSeenAlertsAt` is unrelated to profile
+  editing — written only by `hooks/useAlertsSync.ts` after each NEW_EVENT sync pass, so
+  the next pass only checks semesterActivities published after that point.
 - `courses.ts` (`listMyCourses`), `courseSections.ts` — scoped to the caller's
   `studentProfile.academicClassId`, resolved server-side from their auth identity, never
   trusted from a client-passed param.
@@ -352,6 +459,20 @@ repo — see `AGENTS.md`). Auth tables come from `@convex-dev/auth`'s `authTable
 - `notificationPreferences.ts` — one row per student for Settings' push/sound/calendar-
   sync toggles; also `ctx.auth`-derived. A separate table from `reminderPreferences`
   (timing) — don't conflate the two.
+- `alerts.ts` — two unrelated things in one file: `listBySemester` (semesterActivities,
+  read-only, predates and is independent of everything below — Calendar/Home's own
+  merge into their unified activity list, see the Calendar section) and the Alerts
+  tab's actual feed CRUD — `listMine`, `create` (called by `hooks/useAlertsSync.ts`,
+  dedup-checked against `by_userId_entityId_kind` before insert), `markRead`,
+  `markAllRead`, `remove`/`removeAll`. Named `remove`/`removeAll`, not `delete`/
+  `deleteAll` — `delete` is a reserved word, not a valid binding name, same reason
+  `personalReminders.ts`/`courseActivities.ts` use `remove` too. `entityType` on the
+  `alerts` table reuses the exact same union `reminders.ts`'s own `entityType` field
+  uses (`courseActivities`/`semesterActivities`/`personalReminders`, matching real
+  table names) — one entity-kind vocabulary in this schema, not a second, differently-
+  cased one invented for this table specifically. See AGENTS.md's Alerts feed section
+  for the three alert kinds and the `title`/`subtitle`/`priority`-frozen-at-creation
+  schema note.
 - `seed.ts` — dev-only seed data: institution, KTU faculty/department/program/class
   hierarchy, courses with per-division `courseSections`, course/semester activities,
   and a ready-to-log-in demo student (`demo@example.com` / `demo1234` — see README).
@@ -432,12 +553,19 @@ buttons, ad hoc error display):
   Icons on Android/web; add new names to the `MAPPING` object in the `.tsx` fallback
   when you introduce one.
 
-`hooks/use-app-toast.ts` — `useAppToast()`, a thin wrapper over heroui-native's own
+`hooks/use-app-toast.tsx` — `useAppToast()`, a thin wrapper over heroui-native's own
 `useToast()` (its `ToastProvider` already comes from `HeroUINativeProvider`, no separate
 setup). `showSuccess`/`showError`/`showWarning` map onto heroui's `success`/`danger`/
-`warning` variants. Toast is for action-level outcomes (login/signup/verification
-failures, rate limits, "code sent" confirmations); per-field validation (wrong format,
-passwords don't match) stays inline on the `TextField` itself — don't mix the two up.
+`warning` variants, rendered via the "custom component" `toast.show({ component })`
+form rather than the plain config-object form — heroui's default Toast keeps the same
+neutral `bg-surface` background for every variant (only the label text tints), which
+read as barely distinguishable at a glance; the custom-component version adds a real
+`bg-{variant}/15` tint plus a variant icon (checkmark/exclamation-circle/exclamation-
+triangle) so each state is visually distinct, same bg/icon pairing convention as
+`PriorityBadge`/`ActivityCard`'s icon well. `.tsx`, not `.ts`, since it now renders JSX.
+Toast is for action-level outcomes (login/signup/verification failures, rate limits,
+"code sent" confirmations); per-field validation (wrong format, passwords don't match)
+stays inline on the `TextField` itself — don't mix the two up.
 
 `components/shared/` is the reuse-first inventory — see "Library-first, reuse-first" in
 AGENTS.md's Design posture for the rule that populates it. Current pieces:
@@ -473,11 +601,25 @@ AGENTS.md's Design posture for the rule that populates it. Current pieces:
   `isReminderFormValid`, so Add and Edit gate their `ModalHeader` Save button from the
   identical rule instead of two copies of it.
 - `ActivityCard.tsx` — one row in the unified activity list, used by Home's dashboard
-  list and Calendar's day agenda today (Alerts once it exists). Course activities,
-  personal reminders, and semester activities all render through it — see AGENTS.md's
-  Display integration section for the colour/indicator rules. `hideDate` drops the
-  per-row date (Calendar's agenda already shows it once, in its own header line; Home's
-  list spans multiple days and needs it per-row, the default).
+  sections and Calendar's day agenda (Alerts once it exists). Rebuilt for Wireframe_02
+  during the Home pass — this superseded the earlier course-colour-dot-plus-`ListGroup`
+  treatment entirely, not just on Home: each card is now its own bordered `rounded-md`
+  surface (callers stack them with a plain gap, not a shared `ListGroup`+`Separator`
+  container), three regions — a 34px `rounded-md` (not circular) icon well tinted
+  `bg-{priority}/15` with an icon in `{priority}-foreground` (varies by kind/
+  `activityType`: exam → triangle, quiz → book, assignment/project → doc, personal →
+  checklist, semester → graduation cap, overdue → exclamation-circle, which wins over
+  the type-based icon when it applies), a title + subtitle middle column, and a small
+  `{priority}/15` bg + `{priority}` text pill badge on the right. `priority` is always
+  the activity's real stored/domain value (CRITICAL by rule for semesterActivity, never
+  stored) — same "never Calendar's dot-legend Personal bucket" rule as `PriorityBadge`
+  below. The subtitle is computed internally from `dueDate`/`displayTime`/`endTime`, not
+  passed in as a raw string: "Due today, 4:00 PM" for today, a plain weekday+date for
+  other days, "Overdue by N days" in `text-critical` for anything overdue (never for
+  semesterActivity — institutional events can't be "overdue"), with course
+  title/"Personal task"/"Institutional event" only shown when `hideDate` is true
+  (Calendar's agenda, where the day is already shown once in its own header line —
+  Home's list spans multiple days and shows the date per-row instead, the default).
 - `PriorityBadge.tsx` — the one priority pill (filled `bg-{priority}` +
   `text-{priority}-foreground`, uppercase label), first built for the reminder-timing
   screen and now reused on Activity Details' hero row rather than a second copy of the
@@ -490,8 +632,20 @@ AGENTS.md's Design posture for the rule that populates it. Current pieces:
   an arbitrary CSS colour string per schema, safe to use as an opaque dot/text colour,
   not safe to alpha-blend into a background without assuming a hex format the schema
   never promised). Used on Activity Details' hero row when the resolved activity has a
-  course; second usage of "course code + title as a small chip" after `ActivityCard`'s
-  dot, extracted per the reuse-first rule.
+  course.
+- `Avatar.tsx` — the one avatar: initials (via `lib/initials.ts#getInitials`) on a
+  circle whose colour is derived deterministically from the `name` prop (djb2-style
+  hash mod a 6-colour palette drawn entirely from existing tokens — `personal`,
+  `important`, `flexible`, `critical`, `accent`, and `link` as a second, darker navy at
+  the same hue as `accent` — see the component for the exact pairing), not random —
+  same input always produces the same colour, so a student's avatar never flickers
+  between renders/screens/sessions. Sizes `sm`/`md`/`lg` (40/44/96px) — `md` replaced
+  two previously-different ad hoc sizes (Home's plain 44px circle, Settings' heroui
+  `size="lg"` 64px preset) with one shared size for both "compact identity" contexts;
+  `lg` is the profile detail screen's hero size. Used on Home's header, Settings'
+  profile card, and the profile detail screen — reach for this anywhere else an avatar
+  is needed, not heroui's own `Avatar` (still fine elsewhere it's already used, just not
+  for anything representing the student themselves).
 - `ActionSheet.tsx` — the three-dot "..." context menu, wrapping heroui-native's own
   `Menu` (a positioned floating popover, not a hand-rolled sheet) rather than building
   one from `Dialog` — library-first, reuse-first. Takes a `trigger` (typically a
@@ -510,11 +664,12 @@ aware (fields before it render locked/disabled and fixed to their initial value,
 `startingFrom` and everything below are live). Shared by Profile Setup
 (`startingFrom` omitted — everything editable) and `app/edit-academic-details.tsx`
 (`startingFrom` = whichever field's pencil was tapped on the profile detail screen) —
-see AGENTS.md's Profile editing section. `activity-details/`, `activity-form/`, `alerts/`,
-`calendar/`, `reminders/`, `settings/` are still empty — Settings' and the reminder
-forms' own screen-specific pieces so far live inline in their route files rather than
-under a matching `components/features/*/` dir, since none of it is reused *within a
-single screen's variants* (as opposed to across screens, which is what routes things to
+see AGENTS.md's Profile editing section. `alerts/` now holds `AlertCard.tsx` (see the
+Alerts section above). `activity-details/`, `activity-form/`, `calendar/`,
+`reminders/`, `settings/` are still empty — Settings' and the reminder forms' own
+screen-specific pieces so far live inline in their route files rather than under a
+matching `components/features/*/` dir, since none of it is reused *within a single
+screen's variants* (as opposed to across screens, which is what routes things to
 `components/shared/` instead). Create the remaining empty feature dirs as each feature
 is actually built, not preemptively.
 
