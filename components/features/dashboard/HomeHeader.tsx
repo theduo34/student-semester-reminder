@@ -1,12 +1,15 @@
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Avatar } from '@/components/shared/Avatar';
 import { HEADER_CONTENT_HEIGHT, SCREEN_HORIZONTAL_PADDING } from '@/components/ui/Screen';
 
 export type HomeHeaderProps = {
   date: string;
   name: string;
-  avatarInitials: string;
+  /** Also drives the avatar's initials and colour (see components/shared/Avatar.tsx) — pass the full name, not a pre-shortened greeting name. */
+  fullName: string;
+  onAvatarPress: () => void;
 };
 
 /**
@@ -17,9 +20,10 @@ export type HomeHeaderProps = {
  * fit this content at a legible size, rather than shrinking the type to fit a shorter
  * bar. Kept as its own component rather than folded into AppTopBar: no left/right
  * action slots, structurally different content. Passed as Screen's `header` prop.
- * Static/placeholder data only at this stage — no auth wiring yet.
+ * Avatar is tappable — shortcut to the profile detail screen, the same one reachable
+ * from Settings > Profile card.
  */
-export function HomeHeader({ date, name, avatarInitials }: HomeHeaderProps) {
+export function HomeHeader({ date, name, fullName, onAvatarPress }: HomeHeaderProps) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -31,11 +35,9 @@ export function HomeHeader({ date, name, avatarInitials }: HomeHeaderProps) {
           <Text className="text-sm text-muted">{date}</Text>
           <Text className="text-xl font-bold text-foreground">Hello, {name}</Text>
         </View>
-        <View className="h-11 w-11 items-center justify-center rounded-full bg-surface-secondary">
-          <Text className="text-base font-medium text-surface-secondary-foreground">
-            {avatarInitials}
-          </Text>
-        </View>
+        <Pressable onPress={onAvatarPress} hitSlop={8} accessibilityRole="button" accessibilityLabel="Open profile">
+          <Avatar name={fullName} size="md" />
+        </Pressable>
       </View>
     </View>
   );

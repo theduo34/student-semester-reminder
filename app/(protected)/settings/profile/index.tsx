@@ -1,16 +1,16 @@
 import { useMutation, useQuery } from 'convex/react';
 import { useRouter } from 'expo-router';
-import { Avatar, ListGroup, Separator, Skeleton, useThemeColor } from 'heroui-native';
+import { ListGroup, Separator, Skeleton, useThemeColor } from 'heroui-native';
 import { useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SESSION_LABELS } from '@/components/features/onboarding/AcademicHierarchyForm';
+import { Avatar } from '@/components/shared/Avatar';
 import { EditFieldModal, EditFieldOption } from '@/components/shared/EditFieldModal';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { api } from '@/convex/_generated/api';
 import { Id } from '@/convex/_generated/dataModel';
-import { getInitials } from '@/lib/initials';
 import { isValidEmail, isValidPhoneNumber } from '@/lib/validation';
 
 type EditableField = 'name' | 'phone' | 'institutionalEmail' | 'division';
@@ -67,7 +67,6 @@ export default function ProfileDetailScreen() {
     return null;
   }
 
-  const initials = getInitials(viewer.name);
   const joinedDate = new Date(viewer._creationTime).toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -141,9 +140,7 @@ export default function ProfileDetailScreen() {
         contentContainerClassName="gap-8 px-4 pt-8"
         contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}>
         <View className="items-center gap-2">
-          <Avatar size="lg" color="accent" className="h-24 w-24">
-            <Avatar.Fallback className="text-3xl">{initials}</Avatar.Fallback>
-          </Avatar>
+          <Avatar name={viewer.name ?? ''} size="lg" />
           <Text className="text-xl font-bold text-foreground">{viewer.name ?? 'Student'}</Text>
           <View className="flex-row items-center gap-1">
             <IconSymbol name="calendar" size={14} color={muted} />

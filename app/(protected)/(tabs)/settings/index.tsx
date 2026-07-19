@@ -1,17 +1,17 @@
 import { useAuthActions } from '@convex-dev/auth/react';
 import { useMutation, useQuery } from 'convex/react';
 import { useRouter } from 'expo-router';
-import { Avatar, Card, ListGroup, Separator, Skeleton, Switch, useThemeColor } from 'heroui-native';
+import { Card, ListGroup, Separator, Skeleton, Switch, useThemeColor } from 'heroui-native';
 import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 
+import { Avatar } from '@/components/shared/Avatar';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { AppTopBar } from '@/components/shared/AppTopBar';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Screen } from '@/components/ui/Screen';
 import { api } from '@/convex/_generated/api';
 import { useAppToast } from '@/hooks/use-app-toast';
-import { getInitials } from '@/lib/initials';
 import { formatIntervalsSummary } from '@/lib/reminderIntervals';
 
 const PRIORITY_ROWS = [
@@ -73,7 +73,6 @@ export default function SettingsScreen() {
     }
   };
 
-  const initials = getInitials(viewer?.name);
   const joinedDate = viewer
     ? new Date(viewer._creationTime).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
     : '';
@@ -91,9 +90,7 @@ export default function SettingsScreen() {
             <Pressable onPress={() => router.push('/settings/profile')}>
               <Card className="rounded-md">
                 <Card.Body className="flex-row items-center gap-4">
-                  <Avatar size="lg" color="accent">
-                    <Avatar.Fallback>{initials}</Avatar.Fallback>
-                  </Avatar>
+                  <Avatar name={viewer?.name ?? ''} size="md" />
                   <View className="flex-1 gap-0.5">
                     <Card.Title>{viewer?.name ?? 'Student'}</Card.Title>
                     <View className="flex-row items-center gap-1">
