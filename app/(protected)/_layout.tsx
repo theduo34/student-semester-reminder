@@ -9,12 +9,18 @@ export default function ProtectedLayout() {
   return (
     <Stack>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      {/* Uses AppTopBar instead of the native header — see components/shared/AppTopBar.tsx */}
-      <Stack.Screen name="activity/[entityId]/index" options={{ headerShown: false }} />
-      {/* Native header (not AppTopBar) — platform-standard back button/gesture and
-          title placement (centered on iOS, leading on Android, per each OS's own
-          convention — native-stack has no cross-platform title-align override) come
-          free this way. */}
+      {/* Native header — platform-standard back button/gesture and title placement
+          (centered on iOS, leading on Android, per each OS's own convention —
+          native-stack has no cross-platform title-align override) come free this way.
+          Every screen with a back button uses this, not AppTopBar — see CLAUDE.md's
+          Back button styling note. `activity/[entityId]` sets its own dynamic
+          `headerRight` (the three-dot menu, personal reminders only) via a local
+          `<Stack.Screen options={...}>` inside the route component itself, since that
+          depends on data the layout here doesn't have. */}
+      <Stack.Screen
+        name="activity/[entityId]/index"
+        options={{ headerShown: true, headerBackButtonDisplayMode: 'minimal', title: 'Activity details' }}
+      />
       <Stack.Screen
         name="settings/reminder-timing/[priority]/index"
         options={{ headerShown: true, headerBackButtonDisplayMode: 'minimal' }}

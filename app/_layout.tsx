@@ -12,6 +12,7 @@ import 'react-native-reanimated';
 import '@/global.css';
 import { SplashReveal } from '@/components/shared/SplashReveal';
 import { useAuthGate } from '@/hooks/use-auth-gate';
+import { useAlertsSync } from '@/hooks/useAlertsSync';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useNotificationObserver } from '@/hooks/use-notification-observer';
 import { authStorage } from '@/lib/authStorage';
@@ -40,6 +41,7 @@ export default function RootLayout() {
 
 function RootNavigator() {
   useNotificationObserver();
+  useAlertsSync();
   const gate = useAuthGate();
   const [nativeSplashHidden, setNativeSplashHidden] = useState(false);
   const [showReveal, setShowReveal] = useState(false);
@@ -70,13 +72,20 @@ function RootNavigator() {
         <Stack.Protected guard={gate.status === 'ready'}>
           <Stack.Screen name="(protected)" options={{ headerShown: false }} />
         </Stack.Protected>
+        {/* fullScreenModal (not 'modal') — the New/Edit Reminder forms read as their own
+            full screen, not an inset card peeking at what's behind it; ModalHeader's
+            X/plus already gives them a "screen you close" feel, this makes the
+            presentation match. iOS: true full-screen (UIModalPresentationFullScreen),
+            no swipe-to-dismiss — closing is the X button only, same as edit-academic-
+            details' own ConfirmDialog-gated close. Android's 'modal' was already
+            effectively full-height, so this is a no-op there. */}
         <Stack.Screen
           name="add-activity"
-          options={{ presentation: 'modal', headerShown: false }}
+          options={{ presentation: 'fullScreenModal', headerShown: false }}
         />
         <Stack.Screen
           name="edit-activity/[entityId]"
-          options={{ presentation: 'modal', headerShown: false }}
+          options={{ presentation: 'fullScreenModal', headerShown: false }}
         />
         <Stack.Screen name="about" options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen

@@ -1,7 +1,7 @@
 import { useQuery } from 'convex/react';
-import { useRouter } from 'expo-router';
-import { ListGroup, Separator, Skeleton, useThemeColor } from 'heroui-native';
-import { useMemo, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Skeleton, useThemeColor } from 'heroui-native';
+import { useEffect, useMemo, useState } from 'react';
 import { Calendar, CalendarProvider, WeekCalendar } from 'react-native-calendars';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useCSSVariable } from 'uniwind';
@@ -69,6 +69,9 @@ type CalendarActivity = {
   courseColour?: string;
   isCompleted?: boolean;
   priorityBucket: PriorityBucket;
+  /** Real stored/domain priority — CRITICAL by rule for semesterActivity — fed to ActivityCard, which is a different concept from priorityBucket above (that one always reads personalReminders as "Personal", this one never does; see AGENTS.md). */
+  priority: 'CRITICAL' | 'IMPORTANT' | 'FLEXIBLE';
+  activityType?: 'ASSIGNMENT' | 'QUIZ' | 'PROJECT' | 'EXAM';
 };
 
 const RADIUS_MD = 8;
@@ -117,8 +120,25 @@ function ViewToggle({ value, onChange }: { value: ViewMode; onChange: (mode: Vie
 // known perf sink with this library.
 export default function CalendarScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ date?: string; view?: string }>();
   const [viewMode, setViewMode] = useState<ViewMode>('month');
   const [selectedDate, setSelectedDate] = useState(() => toDateKey(Date.now()));
+
+  // Deep-link support for Home's "View all" links (and any future external entry
+  // point): `date`/`view` seed state whenever they're present, not just on first
+  // mount — Expo Router's tab navigator keeps this screen alive across tab switches,
+  // so a second navigation here with different params wouldn't otherwise re-run a
+  // useState initializer. Absent params leave whatever's already selected untouched.
+  useEffect(() => {
+    if (params.date) {
+      setSelectedDate(params.date);
+    }
+  }, [params.date]);
+  useEffect(() => {
+    if (params.view === 'month' || params.view === 'week') {
+      setViewMode(params.view);
+    }
+  }, [params.view]);
 
   const [
     background,
@@ -199,6 +219,8 @@ export default function CalendarScreen() {
         courseColour: course?.colourTag,
         isCompleted: activity.status === 'COMPLETED',
         priorityBucket: priorityBucketFor('courseActivity', activity.priority),
+        priority: activity.priority,
+        activityType: activity.activityType,
       };
     });
 
@@ -223,6 +245,7 @@ export default function CalendarScreen() {
         courseColour: course?.colourTag,
         isCompleted: reminder.isCompleted,
         priorityBucket: 'PERSONAL',
+        priority: reminder.priority,
       };
     });
 
@@ -236,6 +259,7 @@ export default function CalendarScreen() {
       displayTime: event.date,
       isCompleted: false,
       priorityBucket: 'CRITICAL',
+      priority: 'CRITICAL',
     }));
 
     return [...fromCourseActivities, ...fromPersonalReminders, ...fromSemesterActivities].sort(
@@ -414,29 +438,29 @@ export default function CalendarScreen() {
                   <Text className="text-sm text-muted">No activities scheduled</Text>
                 </View>
               ) : (
-                <ListGroup className="rounded-md">
-                  {selectedDayActivities.map((activity, index) => (
-                    <View key={activity.id}>
-                      {index > 0 ? <Separator className="mx-4" /> : null}
-                      <ActivityCard
-                        kind={activity.kind}
-                        title={activity.title}
-                        subtitle={activity.subtitle}
-                        startTime={activity.displayTime}
-                        endTime={activity.endTime}
-                        courseColour={activity.courseColour}
-                        isCompleted={activity.isCompleted}
-                        hideDate
-                        onPress={() =>
-                          router.push({
-                            pathname: '/activity/[entityId]',
-                            params: { entityId: activity.id, type: activity.type },
-                          })
-                        }
-                      />
-                    </View>
+                <View className="gap-2">
+                  {selectedDayActivities.map((activity) => (
+                    <ActivityCard
+                      key={activity.id}
+                      kind={activity.kind}
+                      title={activity.title}
+                      priority={activity.priority}
+                      activityType={activity.activityType}
+                      dueDate={activity.dueDate}
+                      displayTime={activity.displayTime}
+                      endTime={activity.endTime}
+                      courseTitle={activity.subtitle}
+                      isCompleted={activity.isCompleted}
+                      hideDate
+                      onPress={() =>
+                        router.push({
+                          pathname: '/activity/[entityId]',
+                          params: { entityId: activity.id, type: activity.type },
+                        })
+                      }
+                    />
                   ))}
-                </ListGroup>
+                </View>
               )}
             </View>
           </CalendarProvider>

@@ -43,6 +43,9 @@ const MAPPING = {
   'flag.fill': 'flag',
   'books.vertical.fill': 'menu-book',
   link: 'link',
+  'doc.text': 'description',
+  checklist: 'checklist',
+  'graduationcap.fill': 'school',
 } as IconMapping;
 
 /**

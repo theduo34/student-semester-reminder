@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from 'convex/react';
 import { FunctionReturnType } from 'convex/server';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { ListGroup, Separator, Skeleton, useThemeColor } from 'heroui-native';
 import { Component, ReactNode, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
@@ -8,13 +8,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCSSVariable } from 'uniwind';
 
 import { ActionSheet } from '@/components/shared/ActionSheet';
-import { AppTopBar } from '@/components/shared/AppTopBar';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { CoursePill } from '@/components/shared/CoursePill';
 import { PriorityBadge } from '@/components/shared/PriorityBadge';
 import { Button } from '@/components/ui/Button';
 import { IconSymbol, IconSymbolName } from '@/components/ui/icon-symbol';
-import { Screen, SCREEN_HORIZONTAL_PADDING } from '@/components/ui/Screen';
+import { SCREEN_HORIZONTAL_PADDING } from '@/components/ui/Screen';
 import { api } from '@/convex/_generated/api';
 import { Doc } from '@/convex/_generated/dataModel';
 import { useAppToast } from '@/hooks/use-app-toast';
@@ -169,14 +168,14 @@ export default function ActivityDetailsScreen() {
       key={attempt}
       onError={() => showError('Could not load this activity')}
       fallback={
-        <Screen header={<AppTopBar left="back" title="Activity details" titleVariant="muted" />}>
+        <View className="flex-1 bg-background">
           <ActivityEmptyState
             title="Something went wrong"
             message="We couldn't load this activity. Check your connection and try again."
             onBack={() => router.back()}
             onRetry={() => setAttempt((current) => current + 1)}
           />
-        </Screen>
+        </View>
       }>
       <ActivityDetailsContent entityId={entityId} />
     </ActivityErrorBoundary>
@@ -190,6 +189,7 @@ function ActivityDetailsContent({ entityId }: { entityId: string }) {
   const muted = useThemeColor('muted');
 
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isTogglingComplete, setIsTogglingComplete] = useState(false);
 
   const resolved = useQuery(api.activities.resolveById, { entityId });
 
@@ -223,7 +223,15 @@ function ActivityDetailsContent({ entityId }: { entityId: string }) {
     resolved && resolved.kind === 'personal' ? (
       <ActionSheet
         trigger={
-          <Pressable hitSlop={8} accessibilityRole="button" accessibilityLabel="Activity actions">
+          <Pressable
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Activity actions"
+            // The native header can otherwise leave a default background/highlight
+            // behind a custom headerRight touchable — force it transparent so this
+            // reads the same bare-icon way AppTopBar's back button does, with matching
+            // press feedback instead of none.
+            style={({ pressed }) => ({ opacity: pressed ? 0.4 : 1, backgroundColor: 'transparent' })}>
             <IconSymbol name="ellipsis" color={muted} size={20} />
           </Pressable>
         }
@@ -247,15 +255,19 @@ function ActivityDetailsContent({ entityId }: { entityId: string }) {
 
   const handleToggleReminder = async () => {
     if (!resolved || resolved.kind !== 'personal') return;
+    setIsTogglingComplete(true);
     try {
       await toggleReminderComplete({ reminderId: resolved.activity._id });
     } catch {
       showError('Could not update — try again');
+    } finally {
+      setIsTogglingComplete(false);
     }
   };
 
   const handleToggleCourseStatus = async () => {
     if (!resolved || resolved.kind !== 'course') return;
+    setIsTogglingComplete(true);
     try {
       await updateCourseActivityStatus({
         activityId: resolved.activity._id,
@@ -263,12 +275,17 @@ function ActivityDetailsContent({ entityId }: { entityId: string }) {
       });
     } catch {
       showError('Could not update — try again');
+    } finally {
+      setIsTogglingComplete(false);
     }
   };
 
   return (
     <View className="flex-1 bg-background">
-      <AppTopBar left="back" title="Activity details" titleVariant="muted" right={menu} />
+      {/* Native header (registered in app/(protected)/_layout.tsx) provides the back
+          button and title — this just overrides its headerRight reactively, since the
+          menu depends on `resolved`, which the layout doesn't have. */}
+      <Stack.Screen options={{ headerRight: () => menu ?? null }} />
 
       {resolved === undefined ? (
         <ScrollView
@@ -320,13 +337,21 @@ function ActivityDetailsContent({ entityId }: { entityId: string }) {
                     </Button>
                   </View>
                   <View className="flex-1">
-                    <Button icon="checkmark" onPress={handleToggleReminder}>
+                    <Button
+                      icon="checkmark"
+                      onPress={handleToggleReminder}
+                      isLoading={isTogglingComplete}
+                      loadingLabel="Updating…">
                       {viewModel.isCompleted ? 'Mark incomplete' : 'Mark complete'}
                     </Button>
                   </View>
                 </>
               ) : (
-                <Button icon="checkmark" onPress={handleToggleCourseStatus}>
+                <Button
+                  icon="checkmark"
+                  onPress={handleToggleCourseStatus}
+                  isLoading={isTogglingComplete}
+                  loadingLabel="Updating…">
                   {viewModel.isCompleted ? 'Mark incomplete' : 'Mark complete'}
                 </Button>
               )}
@@ -415,10 +440,17 @@ function InfoRow({ icon, label, value, mutedValue }: { icon: IconSymbolName; lab
       <ListGroup.ItemPrefix>
         <IconSymbol name={icon} size={16} color={muted} />
       </ListGroup.ItemPrefix>
+      {/* ItemContent's flex-1 alone lets it shrink below the label's natural width once
+          the suffix value is long, wrapping the label letter-by-letter instead of on
+          word boundaries — numberOfLines on both sides forces each to truncate on one
+          line instead, and the suffix gets a max-width so it can't crowd the label out
+          entirely. */}
       <ListGroup.ItemContent>
-        <ListGroup.ItemTitle className="text-sm font-normal text-muted">{label}</ListGroup.ItemTitle>
+        <ListGroup.ItemTitle className="text-sm font-normal text-muted" numberOfLines={1}>
+          {label}
+        </ListGroup.ItemTitle>
       </ListGroup.ItemContent>
-      <ListGroup.ItemSuffix>
+      <ListGroup.ItemSuffix style={{ maxWidth: '55%' }}>
         <Text className={`text-sm font-medium ${mutedValue ? 'text-muted' : 'text-foreground'}`} numberOfLines={1}>
           {value}
         </Text>
