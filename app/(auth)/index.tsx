@@ -25,12 +25,12 @@ export default function AuthScreen() {
       <AuthHeader />
 
       <Tabs value={tab} onValueChange={(value) => setTab(value as AuthTab)}>
-        <Tabs.List>
+        <Tabs.List className="w-full">
           <Tabs.Indicator />
-          <Tabs.Trigger value="login">
+          <Tabs.Trigger value="login" className="flex-1">
             <Tabs.Label>Log in</Tabs.Label>
           </Tabs.Trigger>
-          <Tabs.Trigger value="register">
+          <Tabs.Trigger value="register" className="flex-1">
             <Tabs.Label>Register</Tabs.Label>
           </Tabs.Trigger>
         </Tabs.List>
