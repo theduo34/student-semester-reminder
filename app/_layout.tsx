@@ -78,6 +78,11 @@ function RootNavigator() {
           name="edit-activity/[entityId]"
           options={{ presentation: 'modal', headerShown: false }}
         />
+        <Stack.Screen name="about" options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen
+          name="edit-academic-details"
+          options={{ presentation: 'modal', headerShown: false }}
+        />
       </Stack>
       {showReveal && <SplashReveal onFinish={() => setShowReveal(false)} />}
     </>

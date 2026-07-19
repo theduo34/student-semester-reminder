@@ -66,7 +66,7 @@ export function AppTabBar({ state, descriptors, navigation }: BottomTabBarProps)
           router.push('/add-activity');
         }}
         accessibilityRole="button"
-        accessibilityLabel="Add activity"
+        accessibilityLabel="Add reminder"
         className="-mt-7.5 h-14 w-14 items-center justify-center rounded-full bg-accent shadow-lg">
         <IconSymbol name="plus" color={accentForeground} size={28} />
       </Pressable>
