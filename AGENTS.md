@@ -170,11 +170,14 @@ just this one.
   a fixed set, e.g. Division), pre-filled, Save disabled until changed and valid.
 - **Academic hierarchy edits** (Faculty/Department/Program/Level/Session) are
   cascading, not single-field — see below.
-- **Avatar initials**: first name's first letter + last name's first letter, uppercase,
-  always exactly 1 or 2 characters (`"Kwame Nkrumah Ofori-Atta"` → `"KO"`, not `"KNO"`;
-  a single-word name → its one letter). One helper, `lib/initials.ts`'s `getInitials` —
-  every avatar in the app (Settings, profile detail, Home) calls this, never inlines
-  its own `.charAt(0)`.
+- **Avatar**: `components/shared/Avatar.tsx` is the one avatar — initials (first name's
+  first letter + last name's first letter, uppercase, always exactly 1 or 2 characters
+  via `lib/initials.ts#getInitials`, e.g. `"Kwame Nkrumah Ofori-Atta"` → `"KO"`, not
+  `"KNO"`; a single-word name → its one letter) on a circle whose colour is derived
+  deterministically from the student's name (a stable hash into a small palette drawn
+  from existing tokens) rather than a flat neutral background — same student, same
+  colour, every render. Every avatar in the app (Settings, profile detail, Home) uses
+  this component; never inline `.charAt(0)` or a plain muted circle for a new one.
 
 ### Cascading academic hierarchy edits
 
@@ -209,17 +212,52 @@ going forward):
 - **Important** — assignments, quizzes, projects.
 - **Flexible** — personal reminders, lower-stakes course items.
 
-## Alerts feed — two different mechanisms, do not conflate
+## Alerts feed
 
-1. Assignment/exam/personal reminders: scheduled entirely on-device via
-   `expo-notifications` at creation time. No server involvement.
-2. Admin-originated alerts ("new institutional event published"): these originate in the
-   separate Admin app and can't be delivered via local scheduling. Real server push
-   (Expo push tokens + a Convex push action) is a deliberate scope boundary, out for the
-   MVP — see the comment in `convex/alerts.ts`. Instead, since Convex is already
-   real-time, the client watches `alerts.listBySemester` for new semesterActivities rows
-   and logs anything new into a local read/unread feed (AsyncStorage) shown in the
-   Alerts tab next time the app is open.
+The Alerts tab is a client-derived log, Convex-backed (the `alerts` table), not real OS
+push notifications — real server push (Expo push tokens + a Convex push action) stays a
+deliberate scope boundary, out for the MVP. Three kinds, one central write path:
+
+- **`REMINDER_FIRED`** — a courseActivity/personalReminder's configured
+  reminderPreferences interval has passed relative to its due time (courseActivity:
+  `dueDate`; personalReminder: `startTime`, matching what an actual notification would
+  fire against). **Flagged gap**: no real on-device notification scheduling exists in
+  this app yet (`expo-notifications` isn't actually called anywhere to schedule
+  anything — see CLAUDE.md's `hooks/` section) — this kind is derived from data
+  (has the trigger time implied by the configured interval passed?) rather than
+  observing a real fired notification, the closest available approximation until local
+  scheduling is built as its own pass.
+- **`NEW_EVENT`** — a semesterActivities row created after the student's
+  `studentProfiles.lastSeenAlertsAt`. A student's first-ever sync baselines this
+  timestamp without alerting on the pre-existing catalogue, rather than dumping every
+  institutional event that existed before they signed up into their feed.
+- **`OVERDUE`** — a courseActivity/personalReminder's `dueDate` has passed while not
+  completed. Institutional events (semesterActivities) never generate this kind — they
+  have no completion concept to be "overdue" against.
+
+All three are written by **`hooks/useAlertsSync.ts`**, the one place this logic lives —
+called once from the root layout, on mount/foreground/a 5-minute interval, not scattered
+per-screen. Any future alert source hooks in there too. Deduped server-side by
+`(userId, entityId, kind)` before insert (`convex/alerts.ts#create`), so a redundant
+sync pass (clock drift, a second foreground within the same interval) never produces a
+duplicate.
+
+**Schema note**: the alerts table also stores `title`/`subtitle`/`priority`, frozen at
+creation time — not re-derived from `entityId` on every read. A live join across three
+different tables would go stale the instant a relative-time message ("due in 3 hours")
+was written, and would break outright if the referenced entity is later edited or
+deleted. This is the same behavior any real push notification already has: what you
+received is what it said at send time, not a live view of current state.
+
+Alert cards group into four time buckets — Today / Yesterday / This week / Earlier — by
+`createdAt`; an empty bucket is omitted entirely (see CLAUDE.md's Alerts section for the
+exact boundaries). Tapping a card marks it read optimistically (flip `isRead`
+immediately, mutation in the background, no visual delay) and navigates to Activity
+Details via the same polymorphic route every other activity tap uses. Single-item
+delete is swipe-to-reveal (`react-native-gesture-handler`'s `Swipeable`, already a
+project dependency) with no confirmation — the standing rule for low-stakes list-item
+dismissal in this app going forward; `ConfirmDialog` stays reserved for bulk/high-stakes
+actions (Clear all alerts, Log out, Delete a reminder from Activity Details).
 
 ## Activity details routing
 
@@ -251,26 +289,33 @@ the open questions below).
 ## Display integration — unified activity list
 
 Home and Calendar (and eventually Alerts, once it exists — see CLAUDE.md) render
-course activities, personal reminders, and (Calendar only, so far) semester activities
-via the one shared row, `components/shared/ActivityCard.tsx` — never two separate
-sections, never a screen-specific copy of the same row. Colour rule: a course's
-`colourTag` is always the accent when an item is tied to a course — whether it's the
-course activity itself or a personal reminder the student attached to that course —
-with a small "•" shown only on the latter, since that's the one case a same-coloured
-row is actually the student's own to edit. A personal reminder with no course falls
-back to the shared `--personal` token; a semester activity (never tied to a course)
-falls back to `--critical` instead — it's an institutional event, not the student's
-own, so it must never read as the same purple as a personal reminder. Time-range
-reminders (`endTime` present) display as a range ("6:00 – 8:00 PM"); everything else
-shows a single time — don't invent a separate "range" badge/chip for this, the times
-already say it.
+course activities, personal reminders, and semester activities via the one shared row,
+`components/shared/ActivityCard.tsx` — never two separate sections, never a
+screen-specific copy of the same row. Rebuilt for Wireframe_02 during the Home pass:
+priority is the row's organizing colour now, not course `colourTag` — a left icon well
+tinted to the item's real priority (CRITICAL/IMPORTANT/FLEXIBLE, CRITICAL by rule for a
+semester activity, never a stored field there) with a priority-varying icon, and a
+small priority-tinted badge on the right. Course `colourTag` and the old "•"
+own-vs-admin indicator are gone from this row entirely — a course-linked item's course
+name only surfaces via the subtitle when `hideDate` is set (Calendar's agenda; see
+below), not as a persistent colour cue on every row. Time-range reminders (`endTime`
+present) display as a range ("4:00 PM – 6:00 PM") in the subtitle when due today;
+everything else shows a single time — don't invent a separate "range" badge/chip for
+this, the times already say it.
+
+The subtitle text itself is computed inside `ActivityCard`, not passed in as a string:
+due today shows a time, other days show a plain date, anything overdue (never a
+semester activity — institutional events can't be "overdue") shows "Overdue by N days"
+in `--critical`. `hideDate` (Calendar's agenda, where the day is already shown once in
+its own header line) swaps this for course title / "Personal task" / "Institutional
+event" instead — see CLAUDE.md's Home section for the full breakdown.
 
 Calendar's month/week grid uses a *different*, simpler colour system than
-`ActivityCard`'s per-row accent — every day gets one dot per distinct priority tier
+`ActivityCard`'s per-row treatment — every day gets one dot per distinct priority tier
 present (deduplicated, not one dot per activity), and every personal reminder buckets
 as "Personal" there regardless of its own priority field. See CLAUDE.md's Calendar
-section for why the grid's bucket and a row's accent colour aren't the same rule and
-shouldn't be unified.
+section for why the grid's bucket and a row's own priority colour aren't the same rule
+and shouldn't be unified.
 
 ## UX conventions
 
