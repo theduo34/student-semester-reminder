@@ -7,7 +7,7 @@ import { query } from './_generated/server';
 // Scoped to the signed-in student's academicClass (resolved server-side from their
 // studentProfile, not trusted from the client) rather than every course in the
 // semester institution-wide.
-export const listBySemester = query({
+export const listMyCourses = query({
   args: { semesterId: v.id('semesters') },
   handler: async (ctx, { semesterId }) => {
     const userId = await getAuthUserId(ctx);
