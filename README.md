@@ -25,6 +25,35 @@ In the output, you'll find options to open the app in a
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
+## Demo / seed data
+
+`convex/seed.ts` seeds a realistic development and defense-demo fixture — institution,
+KTU faculty/department/program/class hierarchy, courses with per-division schedules,
+course activities, semester activities, and a ready-to-log-in demo student. It's the
+source of demo data for this project — there's no manual data entry via the UI during
+dev.
+
+Run it against your dev deployment with:
+
+```bash
+npx convex run seed:seedAll '{"iAmSure": true}'
+```
+
+The `iAmSure` confirmation is required on purpose — see the comment on `seedAll` in
+`convex/seed.ts` for why (Convex doesn't expose a reliable way for backend code to
+detect dev vs. production, so this explicit flag is the safety gate). **Never run this
+against a real production deployment.**
+
+Demo login:
+
+- Email: `demo@example.com`
+- Password: `demo1234`
+
+The seed is idempotent — every function checks for existing rows by a natural key
+(name/code/combined lookup) before inserting, so re-running `seedAll` is always safe
+and never creates duplicates. It never deletes or overwrites existing rows; a
+wipe-and-reseed would be a separate, deliberately unbuilt script.
+
 ## Get a fresh project
 
 When you're ready, run:
