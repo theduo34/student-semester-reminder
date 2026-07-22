@@ -27,10 +27,36 @@ export const alertKindValidator = v.union(
 // (query args that must accept exactly the same values).
 export const sessionValidator = v.union(v.literal('REGULAR'), v.literal('WEEKEND'));
 
+// Every user is exactly one of these — there's no third role in this MVP (see
+// AGENTS.md's Admin account section). Students get "student" via the register flow's
+// own profile() callback (convex/auth.ts); admins only ever get "admin" via
+// convex/admins.ts's createAdminAccount, an internalAction with no public
+// equivalent — there is no client-facing "become an admin" path anywhere in this app.
+export const userRoleValidator = v.union(v.literal('student'), v.literal('admin'));
+
 export default defineSchema({
   ...authTables,
+  // Extends (not replaces) authTables' own `users` table — the documented
+  // @convex-dev/auth pattern for adding fields to the auth-managed table rather than
+  // fighting the library with a parallel table. `role` and `institutionId` live here,
+  // not on a separate adminProfiles table: this is a single-institution MVP (see
+  // AGENTS.md), so one extra column costs nothing extra to join, and the routing
+  // guard already reads this same `users` row for every other gate decision.
+  users: defineTable({
+    ...authTables.users.validator.fields,
+    role: userRoleValidator,
+    // Populated for admins only — their institution association lives directly here
+    // instead of a separate profile row, since admins have no studentProfiles-
+    // equivalent table. Optional purely because students never have one;
+    // createAdminAccount always sets it for the admin it creates, never leaves it
+    // unset for one.
+    institutionId: v.optional(v.id('institutions')),
+  })
+    .index('email', ['email'])
+    .index('phone', ['phone']),
 
-  // Published by the separate Academic Admin app. Read-only from this app.
+  // Admin-published (the (admin) route group's Publish tab, once built — see
+  // AGENTS.md's Admin account section). Read-only queries only, as of this pass.
   semesters: defineTable({
     title: v.string(),
     startDate: v.number(),
@@ -83,7 +109,8 @@ export default defineSchema({
     label: v.string(),
   }).index('by_academicClassId', ['academicClassId']),
 
-  // Published by the separate Academic Admin app. Read-only from this app.
+  // Admin-published (the (admin) route group's Courses tab, once built). Read-only
+  // queries only, as of this pass.
   courses: defineTable({
     semesterId: v.id('semesters'),
     academicClassId: v.id('academicClasses'),
@@ -92,9 +119,9 @@ export default defineSchema({
     colourTag: v.string(),
   }).index('by_semesterId_and_academicClassId', ['semesterId', 'academicClassId']),
 
-  // Published by the separate Academic Admin app. Read-only from this app. Schedule
-  // (day/time/venue) varies by division; course activities below don't — that's why
-  // schedule lives here rather than on courses or courseActivities.
+  // Admin-published, read-only queries only as of this pass (same as courses above).
+  // Schedule (day/time/venue) varies by division; course activities below don't —
+  // that's why schedule lives here rather than on courses or courseActivities.
   courseSections: defineTable({
     courseId: v.id('courses'),
     divisionId: v.optional(v.id('divisions')),

@@ -10,6 +10,7 @@ export type AuthGate =
   | { status: 'landing' }
   | { status: 'unauthenticated' }
   | { status: 'unverified'; email: string | undefined }
+  | { status: 'admin' }
   | { status: 'needsProfile' }
   | { status: 'onboarding' }
   | { status: 'ready' };
@@ -30,13 +31,18 @@ export function useAuthGate(): AuthGate {
   const { isLoading: authLoading, isAuthenticated } = useConvexAuth();
   const viewer = useQuery(api.users.viewer, isAuthenticated ? {} : 'skip');
   const isVerified = viewer?.emailVerificationTime !== undefined;
+  const isStudent = viewer?.role === 'student';
+  // Admins have no studentProfile row and no semester concept — these two queries are
+  // pointless for them (guaranteed null/loading forever), so skip fetching either once
+  // the role is known to be 'admin', same as any other query this gate skips when its
+  // precondition doesn't hold.
   const profile = useQuery(
     api.studentProfiles.getMyProfile,
-    isAuthenticated && isVerified ? {} : 'skip',
+    isAuthenticated && isVerified && isStudent ? {} : 'skip',
   );
   const activeSemester = useQuery(
     api.semesters.getActive,
-    isAuthenticated && isVerified && profile ? {} : 'skip',
+    isAuthenticated && isVerified && isStudent && profile ? {} : 'skip',
   );
 
   if (hasSeenLanding === null || authLoading) {
@@ -64,6 +70,14 @@ export function useAuthGate(): AuthGate {
   }
   if (!isVerified) {
     return { status: 'unverified', email: viewer.email };
+  }
+  // Role check comes before the studentProfile check, not after — admins have no
+  // studentProfile row and would otherwise fall into needsProfile. Role is set once,
+  // at account-creation time (the register flow vs. convex/admins.ts's
+  // createAdminAccount — see AGENTS.md's Admin account section) and never changes
+  // after, so this is a stable branch point, not something that needs re-deriving.
+  if (viewer.role === 'admin') {
+    return { status: 'admin' };
   }
   if (profile === undefined) {
     return { status: 'loading' };

@@ -163,8 +163,26 @@ Two Convex deployments exist for this project:
   `/add-activity` as a modal and never carries active/selected state; don't try to wire
   it into the tab navigator's own state. Home and Calendar both render the unified
   activity list (`components/shared/ActivityCard.tsx`) — see the Calendar section
-  below. Alerts is still the bare placeholder from the auth pass (no alerts-feed
-  AsyncStorage infra yet); wiring it up is its own pass, not done here.
+  below. Alerts is fully built (see the Alerts section below) — the FAB here is a
+  student-only pattern (quick personal-reminder creation), which is why
+  `components/shared/AppTabBar.tsx` takes a `centerAction` prop the admin tab bar
+  overrides to `null` rather than this file changing at all — see the Admin route
+  group section below.
+- `app/(admin)/` — the role-gated admin experience living in this same app (see
+  AGENTS.md's Scope boundary and Admin account sections) — not a separate app/repo.
+  `_layout.tsx` is a bare `Stack` wrapping `(tabs)`, mirroring `(protected)/_layout.tsx`'s
+  shape (future pushed admin detail screens register here as siblings of `(tabs)`, same
+  standing rule as the student side's Nested navigation section below).
+  `(tabs)/_layout.tsx` reuses the exact same `AppTabBar` the student side uses — same
+  icon+label grammar, same `--accent` active-state coloring — just four different
+  routes (Dashboard/Hierarchy/Courses/Publish) and `centerAction={null}`: admin has no
+  FAB, since admin's creation actions live inside their own tabs (a "New institutional
+  event" button on Publish, a "New course" button on Courses, etc.), not behind one
+  shared quick-create button the way the student FAB is. All four tab screens are
+  `components/shared/PlaceholderScreen.tsx` placeholders as of this pass (Screen +
+  AppTopBar + centered "___ coming soon" text, the same visual grammar as any other
+  empty state in the app, not a debug page) — Hierarchy/Courses/Publish CRUD are later
+  passes, not built here.
 - `app/add-activity.tsx`, `app/edit-activity/[entityId].tsx` — root-level modals
   (`presentation: "fullScreenModal"`, not the card-inset `"modal"` — these read as their
   own full screen, not a peek at what's behind them; `UIModalPresentationFullScreen` on
@@ -471,10 +489,12 @@ client-callable):
 - **`new_event`** — wherever a `semesterActivity` is actually inserted schedules
   `pushDelivery.notifyNewEvent` via `ctx.scheduler.runAfter(0, ...)` (mutations can't
   make the external HTTP call a push send needs; only actions can). Today that's only
-  `convex/seed.ts#upsertSemesterActivity` — there's no separate Admin app yet (see
-  AGENTS.md's scope boundary) — so **re-running the seed against the preview
-  deployment is the actual defense-demo path**: it delivers a real push to whatever
-  device has a `pushTokens` row for the demo student, not just an Alerts-tab row.
+  `convex/seed.ts#upsertSemesterActivity` — the `(admin)` Publish tab (see the Admin
+  route group section above) is still a placeholder as of this pass, not a real
+  publishing UI yet — so **re-running the seed against the preview deployment is still
+  the actual defense-demo path for push** until Publish is built: it delivers a real
+  push to whatever device has a `pushTokens` row for the demo student, not just an
+  Alerts-tab row.
 - **`overdue`** — `convex/crons.ts` runs `overdueSweep.run` every 15 minutes: a
   full-table scan of `courseActivities`/`personalReminders` (flagged as a real scaling
   limit in both `listOverduePending` queries — fine at this app's demo scale, not
@@ -525,9 +545,22 @@ Sequence, in order:
 2. Logged out (device has seen `(landing)`, or never gets there because it's already
    logged in — see below) → `(auth)` (login/register)
 3. Logged in, email unverified → `(auth)/verify-email`
-4. Logged in, verified, no `studentProfile` row → `(onboarding)/profile-setup`
-5. Logged in, verified, has profile, no active semester → `(onboarding)` (waiting screen)
-6. Logged in, verified, has profile, semester active → `(protected)/(tabs)`
+4. Logged in, verified, `role === 'admin'` → `(admin)/(tabs)`
+5. Logged in, verified, `role === 'student'`, no `studentProfile` row →
+   `(onboarding)/profile-setup`
+6. Logged in, verified, `role === 'student'`, has profile, no active semester →
+   `(onboarding)` (waiting screen)
+7. Logged in, verified, `role === 'student'`, has profile, semester active →
+   `(protected)/(tabs)`
+
+Step 4 (the role check) runs *before* step 5's `studentProfile` check, deliberately —
+an admin has no `studentProfile` row at all, and checking profile/semester first would
+send every admin into `profile-setup` on every login. Role is stable once set (see
+AGENTS.md's Admin account section: it's decided once, at account-creation time, and
+nothing in this app ever changes it after), so this is a cheap, one-time branch — the
+`studentProfile`/`semesters.getActive` queries are also skipped entirely for admins
+(`isStudent` gates both `useQuery` calls to `'skip'`), not just ignored after fetching,
+since they're guaranteed pointless for a role that has neither.
 
 Step 1 only ever intercepts the logged-out branch — a logged-in session never gets
 routed to `(landing)`, regardless of whether that device's flag happens to be unset
@@ -604,15 +637,41 @@ dot indicators — `app/(landing)/index.tsx`'s `DotIndicator` is the current exa
 
 ### Backend (`convex/`)
 
-`schema.ts` is the single source of truth (also consumed, copied, by the separate admin
-repo — see `AGENTS.md`). Auth tables come from `@convex-dev/auth`'s `authTables`.
+`schema.ts` is the single source of truth for both the student and admin experiences
+this app now serves (see `AGENTS.md`'s Scope boundary — there's no second repo
+consuming a copy anymore). Auth tables come from `@convex-dev/auth`'s `authTables`,
+extended (not replaced) with `role` and `institutionId` on `users` — the documented
+`@convex-dev/auth` pattern (`defineTable({ ...authTables.users.validator.fields,
+role: ..., institutionId: ... })`, re-declaring the `email`/`phone` indexes) rather
+than a parallel `adminProfiles` table. See AGENTS.md's Admin account section for why.
 
 - `auth.config.ts` / `auth.ts` — Password provider with `verify: ResendOTP` (see
-  `ResendOTP.ts`) and a `profile()` callback capturing `name` on signup. `reset` is
-  deliberately left unconfigured — forgot-password stays interface-only.
-- `users.ts` — `viewer` query (current user or null), the auth-gate's first check, plus
-  `updateName` — the one field the profile detail screen edits on the auth `users`
-  table rather than `studentProfiles`.
+  `ResendOTP.ts`) and a `profile()` callback capturing `name` and setting
+  `role: 'student' as const` on every signup — the register flow is the only place a
+  student account is ever created, and it's the only place `role` is ever `'student'`
+  by a path other than `convex/admins.ts`. `reset` is deliberately left unconfigured —
+  forgot-password stays interface-only for students (see the auth pass); admins have a
+  completely different, non-self-service reset path, see `admins.ts` below.
+- `users.ts` — `viewer` query (current user or null, including `role`/`institutionId`
+  since it returns the full row), the auth-gate's first check; `updateName` — the one
+  field the profile detail screen edits on the auth `users` table rather than
+  `studentProfiles`; `findUserIdByEmail` (`internalQuery`) — shared by `seed.ts` and
+  `admins.ts`, both of which need "does a user with this email already exist" before
+  deciding whether to create or reuse/reset an account.
+- `admins.ts` — `createAdminAccount`, an `internalAction` (not `internalMutation` —
+  `@convex-dev/auth`'s `createAccount`/`modifyAccountCredentials` both require action
+  context for their credential-hashing pipeline, the same one
+  `signIn(..., { flow: "signUp" })` uses from the client; either function kind is
+  equally unreachable from the mobile app, which is the actual security property here).
+  Runnable only from the Convex dashboard/CLI — see README.md's "Admin accounts"
+  section for the exact commands. Creates the auth account with `role: 'admin'`,
+  `institutionId`, and `emailVerificationTime` all set directly in the `profile` object
+  passed to `createAccount` (no separate patch mutation needed — they're plain fields
+  on the same `users` row `createAccount` already writes). Re-running it against an
+  email that already has an account resets that account's password
+  (`modifyAccountCredentials`) and refreshes `name`/`institutionId`
+  (`admins.ts#setAdminFields`, an `internalMutation` — actions can't `ctx.db.patch`
+  directly) instead of erroring — the entire MVP "forgot admin password" story.
 - `academicStructure.ts` — read-only institutional hierarchy queries (Faculty through
   Division), see AGENTS.md, plus `getFullHierarchy` — resolves an entire profile's
   faculty/department/academicClass/division ids to human-readable names in one call
@@ -779,7 +838,15 @@ stays inline on the `TextField` itself — don't mix the two up.
 AGENTS.md's Design posture for the rule that populates it. Current pieces:
 
 - `AppTopBar.tsx`, `AppTabBar.tsx` — the standard in-tab screen header and the bottom
-  tab bar (with the FAB slot).
+  tab bar. `AppTabBar`'s `centerAction` prop defaults (when omitted) to the student
+  side's "Add reminder" FAB; pass `centerAction={null}` for a tab bar with no center
+  action at all (the admin tab bar's case — see the Admin route group section above),
+  or a different `TabBarCenterAction` object to use a different one. The splice index
+  and slot styling are otherwise identical either way.
+- `PlaceholderScreen.tsx` — `Screen` + `AppTopBar` + centered muted "___ coming soon"
+  text, for a tab whose real content isn't built yet. First used by all four
+  `(admin)/(tabs)` screens (see the Admin route group section above) — reach for this
+  anywhere else a "not built yet" screen is needed rather than a one-off.
 - `SplashReveal.tsx` — the root layout's post-splash mark animation.
 - `ConfirmDialog.tsx` — see "Confirmation & loading patterns" below.
 - `ModalHeader.tsx` — the X-left / bold-centered-title / Save-right header every modal
@@ -941,14 +1008,20 @@ resolved them.
   `heroui-native` + Uniwind imports (see Styling above), which does define the semantic
   tokens named in `AGENTS.md` — but if a different/custom token set was intended, it
   hasn't been applied yet.
-- **Whether the admin app needs write mutations** on `semesters`/`courses`/
-  `semesterActivities`/the institutional hierarchy tables from this shared Convex
-  deployment (vs. writing through some other path) is unresolved — this app currently
-  only exposes read queries for all of them.
-- **`courseActivities.ts`'s `create`/`update`/`remove` mutations are unauthenticated**
-  (no ownership check, no auth check at all) and predate the domain clarification that
-  admin — not students — owns course activities (see AGENTS.md). Nothing in this app
-  calls them anymore. Not removed here since the admin app may still want them (or an
-  admin-gated equivalent) once it writes into this shared deployment — see the write-
-  mutations question above — but leaving unauthenticated mutations sitting in a shared
-  backend is a real gap, flagged rather than silently carried forward.
+- **Resolved by the Admin foundation pass**: admin write mutations on
+  `semesters`/`courses`/`semesterActivities`/the institutional hierarchy tables now
+  have an obvious home — `role: 'admin'`-checked mutations in this same backend,
+  called from the `(admin)` route group's Hierarchy/Courses/Publish tabs once those
+  are built (not this pass — plumbing only, see AGENTS.md's Admin account section).
+  `academicStructure.ts`/`courses.ts`/`alerts.ts#listBySemester` staying read-only
+  *queries* is still accurate; it's specifically the write side that was unresolved,
+  and it's resolved now — no second app, no second deployment, just role-gated
+  mutations here.
+- **`courseActivities.ts`'s `create`/`update`/`remove` mutations are still
+  unauthenticated** (no ownership check, no auth check at all) and predate the domain
+  clarification that admin — not students — owns course activities (see AGENTS.md).
+  Nothing in this app calls them anymore. Not removed in this pass since the upcoming
+  Courses-tab pass is the natural place to either delete them outright or replace them
+  with a proper `role === 'admin'`-checked equivalent — this pass didn't touch
+  `courseActivities.ts` at all, so the gap is unchanged, just no longer waiting on a
+  hypothetical second app to resolve it.

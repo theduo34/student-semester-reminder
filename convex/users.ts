@@ -1,7 +1,22 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
 import { v } from 'convex/values';
 
-import { mutation, query } from './_generated/server';
+import { internalQuery, mutation, query } from './_generated/server';
+
+// System-only — shared by convex/seed.ts (the demo student) and convex/admins.ts (the
+// admin account creation/reset dance), both of which need "does a user with this email
+// already exist" before deciding whether to createAccount or reuse/reset the existing
+// one. One lookup, not two copies of the same query.
+export const findUserIdByEmail = internalQuery({
+  args: { email: v.string() },
+  handler: async (ctx, { email }) => {
+    const user = await ctx.db
+      .query('users')
+      .withIndex('email', (q) => q.eq('email', email))
+      .unique();
+    return user?._id ?? null;
+  },
+});
 
 export const viewer = query({
   args: {},

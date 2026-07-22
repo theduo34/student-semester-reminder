@@ -73,6 +73,14 @@ const DEMO_STUDENT = {
   phoneNumber: '+233241234567',
 };
 
+const DEMO_ADMIN = {
+  name: 'Kwame Admin',
+  authEmail: 'admin@example.com',
+  // Dev-only demo credential, same public/never-real-password status as
+  // DEMO_STUDENT.password above — see README.md.
+  password: 'admin1234',
+};
+
 function atOffset(daysFromToday: number, hour: number, minute: number): number {
   const date = new Date();
   date.setDate(date.getDate() + daysFromToday);
@@ -524,7 +532,7 @@ export const seedCourses = internalMutation({
 export const seedDemoStudent = internalAction({
   args: {},
   handler: async (ctx): Promise<Id<'users'>> => {
-    let userId = await ctx.runQuery(internal.seed.findUserIdByEmail, { email: DEMO_STUDENT.authEmail });
+    let userId = await ctx.runQuery(internal.users.findUserIdByEmail, { email: DEMO_STUDENT.authEmail });
     if (userId === null) {
       const created = await createAccount(ctx, {
         provider: 'password',
@@ -532,6 +540,7 @@ export const seedDemoStudent = internalAction({
         profile: {
           email: DEMO_STUDENT.authEmail,
           name: DEMO_STUDENT.name,
+          role: 'student',
           // Set directly rather than going through the ResendOTP verify flow — this is
           // what makes the account ready-to-log-in with no OTP step for the demo.
           emailVerificationTime: Date.now(),
@@ -542,17 +551,6 @@ export const seedDemoStudent = internalAction({
     }
     await ctx.runMutation(internal.seed.seedDemoStudentData, { userId });
     return userId;
-  },
-});
-
-export const findUserIdByEmail = internalQuery({
-  args: { email: v.string() },
-  handler: async (ctx, { email }) => {
-    const user = await ctx.db
-      .query('users')
-      .withIndex('email', (q) => q.eq('email', email))
-      .unique();
-    return user?._id ?? null;
   },
 });
 
@@ -656,6 +654,35 @@ export const seedDemoStudentData = internalMutation({
       priority: 'CRITICAL',
       courseId: cs305?._id,
     });
+  },
+});
+
+// The demo admin account — same institution as the demo student, created via the
+// actual internal function real admin accounts go through (convex/admins.ts's
+// createAdminAccount), not a parallel dev-only shortcut. Idempotent the same way that
+// function already is: re-running it against an email that already has an account
+// resets the password rather than erroring, so seedAll stays safe to re-run.
+export const seedDemoAdmin = internalAction({
+  args: {},
+  handler: async (ctx): Promise<Id<'users'>> => {
+    const institution = await ctx.runQuery(internal.seed.getInstitutionId, {});
+    if (institution === null) {
+      throw new Error('Run seedInstitution first');
+    }
+    return ctx.runAction(internal.admins.createAdminAccount, {
+      email: DEMO_ADMIN.authEmail,
+      password: DEMO_ADMIN.password,
+      name: DEMO_ADMIN.name,
+      institutionId: institution,
+    });
+  },
+});
+
+export const getInstitutionId = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const institution = await ctx.db.query('institutions').first();
+    return institution?._id ?? null;
   },
 });
 
@@ -918,9 +945,11 @@ export const seedAll = internalAction({
     await ctx.runMutation(internal.seed.seedSemester, {});
     await ctx.runMutation(internal.seed.seedCourses, {});
     await ctx.runAction(internal.seed.seedDemoStudent, {});
+    await ctx.runAction(internal.seed.seedDemoAdmin, {});
     await ctx.runMutation(internal.seed.seedActivities, {});
     await ctx.runMutation(internal.seed.seedDemoAlerts, {});
 
-    console.warn(`[seed] Done. Demo login: ${DEMO_STUDENT.authEmail} / ${DEMO_STUDENT.password}`);
+    console.warn(`[seed] Done. Demo student: ${DEMO_STUDENT.authEmail} / ${DEMO_STUDENT.password}`);
+    console.warn(`[seed] Done. Demo admin: ${DEMO_ADMIN.authEmail} / ${DEMO_ADMIN.password}`);
   },
 });

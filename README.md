@@ -44,15 +44,49 @@ The `iAmSure` confirmation is required on purpose — see the comment on `seedAl
 detect dev vs. production, so this explicit flag is the safety gate). **Never run this
 against a real production deployment.**
 
-Demo login:
+Demo logins:
 
-- Email: `demo@example.com`
-- Password: `demo1234`
+- Student — Email: `demo@example.com`, Password: `demo1234`
+- Admin — Email: `admin@example.com`, Password: `admin1234`
+
+Log in with either during a defense demo to switch between the student and admin
+experiences — same institution, different `role` on the `users` table (see
+`convex/schema.ts` and the "Admin accounts" section below).
 
 The seed is idempotent — every function checks for existing rows by a natural key
 (name/code/combined lookup) before inserting, so re-running `seedAll` is always safe
 and never creates duplicates. It never deletes or overwrites existing rows; a
 wipe-and-reseed would be a separate, deliberately unbuilt script.
+
+## Admin accounts
+
+There is no admin sign-up screen anywhere in this app, and no self-service password
+reset for admins — both are out of scope for the MVP (a separate Academic Admin web
+app owns real admin account management long-term, see `AGENTS.md`'s scope boundary).
+The one way an admin account gets created here is `convex/admins.ts`'s
+`createAdminAccount`, an internal function runnable only from the Convex dashboard or
+CLI — never from the mobile app.
+
+**Create (or reset) an admin from the CLI:**
+
+```bash
+npx convex run admins:createAdminAccount '{"email": "admin@example.com", "password": "secure_password", "name": "Andrew Admin", "institutionId": "<id from the institutions table>"}'
+```
+
+**Or from the dashboard:** open the deployment's dashboard (`npx convex dashboard`) →
+**Functions** tab → find `admins:createAdminAccount` → fill in the same four
+arguments → Run.
+
+**Finding `institutionId`:** dashboard → **Data** tab → `institutions` table → copy
+the `_id` of the row you want (this project seeds exactly one, Koforidua Technical
+University — see `convex/seed.ts`).
+
+**Resetting a forgotten admin password:** re-run the same command with the same email
+and a new password — `createAdminAccount` detects the existing account and resets its
+credential instead of erroring. This is the entire "forgot password" story for admins
+in this MVP, which is exactly why admin passwords should be strong: there's no
+verification email and no reset-link flow standing between a leaked password and the
+account, just this one re-runnable escape hatch.
 
 ## Get a fresh project
 

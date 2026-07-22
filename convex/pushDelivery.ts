@@ -102,7 +102,8 @@ export const sendPushToUser = internalAction({
 // studentProfiles.listAllUserIds for the single-institution scoping caveat. Scheduled
 // (never called directly) via ctx.scheduler.runAfter from wherever a semesterActivity
 // is actually inserted — today that's only convex/seed.ts's upsertSemesterActivity,
-// until the separate Admin app exists (see AGENTS.md's scope boundary). Writes the
+// until the (admin) route group's Publish tab is built (see AGENTS.md's Admin account
+// section — it's a role-gated tab in this same app, not a separate app). Writes the
 // Alerts row itself (via alerts.createForUser) rather than leaving that to
 // hooks/useAlertsSync.ts alone — that client-side path stays as a fallback in case this
 // action's push leg fails or a student's device was offline when it ran, but the dedup

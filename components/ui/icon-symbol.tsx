@@ -46,6 +46,13 @@ const MAPPING = {
   'doc.text': 'description',
   checklist: 'checklist',
   'graduationcap.fill': 'school',
+  // Admin (tabs) icons — see app/(admin)/(tabs)/_layout.tsx.
+  'square.grid.2x2.fill': 'dashboard',
+  // Material's closest fit for "institutional hierarchy" is its own literal org-chart
+  // icon, not a literal building — loose pairing, same spirit as party.popper/
+  // celebration above.
+  'building.2.fill': 'account-tree',
+  'megaphone.fill': 'campaign',
 } as IconMapping;
 
 /**

@@ -91,6 +91,9 @@ function RootNavigator() {
         <Stack.Protected guard={gate.status === 'ready'}>
           <Stack.Screen name="(protected)" options={{ headerShown: false }} />
         </Stack.Protected>
+        <Stack.Protected guard={gate.status === 'admin'}>
+          <Stack.Screen name="(admin)" options={{ headerShown: false }} />
+        </Stack.Protected>
         {/* fullScreenModal (not 'modal') — the New/Edit Reminder forms read as their own
             full screen, not an inset card peeking at what's behind it; ModalHeader's
             X/plus already gives them a "screen you close" feel, this makes the

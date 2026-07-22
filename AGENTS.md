@@ -41,18 +41,55 @@ codes/titles/activity content are invented example data by design, nothing to ve
 
 ## Scope boundary — read before building anything
 
-This repo is the STUDENT-FACING MOBILE APP ONLY. A separate Academic Admin web app
-(Next.js, different repo) publishes semesters and manages the course catalogue. Both
-apps share ONE Convex backend; `convex/` in THIS repo is the source of truth for schema
-and functions — the admin repo consumes a copied version for type generation.
+**Superseded plan, corrected here rather than left contradicting the code**: earlier
+passes described a separate Next.js Academic Admin web app as the owner of semester-
+publishing and course-catalogue management, with this repo staying student-only. That
+plan changed with the Admin foundation pass: admin is now a role-gated experience
+*inside this same Expo app* (the `(admin)` route group, see "Admin account" below),
+not a second app in a second repo. One codebase, one Convex backend, two experiences
+gated by `users.role` at the routing layer (`hooks/use-auth-gate.ts`) — not a
+student/admin split enforced by which repo you're looking at.
 
-Do NOT build semester-publishing, course-catalogue-management, or institutional-
-hierarchy-management (Faculty/Department/Program/academicClass/Division CRUD) UI here.
-This app only READS that data once the admin app has published it
-(`convex/semesters.ts`, `convex/courses.ts`, `convex/alerts.ts`, `convex/
-academicStructure.ts` are all read-only queries). Whether the admin app also needs write
-mutations on those tables from this shared backend is an open question — not built here
-yet, see CLAUDE.md.
+`convex/semesters.ts`, `convex/courses.ts`, `convex/alerts.ts`, and
+`convex/academicStructure.ts` being read-only *queries* is still accurate — semester-
+publishing, course-catalogue management, and institutional-hierarchy management are
+genuinely not built yet (the `(admin)` tab screens are placeholders as of this pass,
+see "Admin account" below) — but "not built yet" now means "the next `(admin)` passes
+build it here," not "a different app owns this."
+
+## Admin account
+
+Every user has a `role` (`"student" | "admin"`) on the auth-managed `users` table,
+extended (not replaced) per `@convex-dev/auth`'s own documented pattern — see
+`convex/schema.ts`. Admins additionally carry `institutionId` directly on their `users`
+row (optional in the schema only because students never have one; every admin account
+gets one, always). No separate `adminProfiles` table: this is a single-institution
+MVP (see "Institution" below), so one extra column costs nothing extra to join, and the
+routing guard already reads this same `users` row for every other gate decision — a
+second table would just be a second place to keep in sync.
+
+**Students** get `role: "student"` automatically, set by the public register flow's own
+`profile()` callback (`convex/auth.ts`) — this is the only account-creation path that
+exists for students, unchanged from before.
+
+**Admins** are created exclusively by `convex/admins.ts`'s `createAdminAccount`, an
+internal function (dashboard/CLI-only, never client-callable) — see README.md's "Admin
+accounts" section for the exact commands. There is no admin sign-up screen and no
+self-service password reset; re-running `createAdminAccount` with an existing email
+resets that account's password instead, which is the entire MVP "forgot password"
+story for admins. Admins skip email verification entirely (`emailVerificationTime` is
+set at creation time, the same trick `convex/seed.ts`'s demo student uses) since
+there's no verification-email flow for them at all.
+
+**Routing**: the auth gate's role check happens *before* the `studentProfile` check,
+not after — an admin has no `studentProfile` row and would otherwise fall into
+`needsProfile`. A logged-in, verified admin goes straight to `(admin)/(tabs)` and skips
+`(onboarding)` entirely — no profile setup, no semester wait, none of that applies to
+an institution-wide admin account. See CLAUDE.md's Onboarding gate section for the full
+sequence.
+
+**Demo admin**: `admin@example.com` / `admin1234` (seeded by `convex/seed.ts`'s
+`seedDemoAdmin`, same institution as the demo student) — see README.md.
 
 ## Tech stack
 
