@@ -259,6 +259,18 @@ project dependency) with no confirmation — the standing rule for low-stakes li
 dismissal in this app going forward; `ConfirmDialog` stays reserved for bulk/high-stakes
 actions (Clear all alerts, Log out, Delete a reminder from Activity Details).
 
+## First-run landing carousel
+
+`app/(landing)/` is a 3-slide "welcome to Termio" carousel shown once, ever, per
+device install, before `(auth)` — see CLAUDE.md's Routing and Onboarding gate sections
+for exactly how the gate decides this and why it's a device-local flag, not a per-
+account one. Copy tone: grounded and specific about what the app actually does, not a
+marketing pitch — students skim these once and never see them again, so each slide
+states one real capability (unified schedule view, personal reminders, institution-
+aware filtering) in plain language rather than building toward a pitch across all
+three. No slide references a feature that isn't built, and none tries to sell the app —
+it's orienting a student who's about to sign up, not persuading a stranger.
+
 ## Activity details routing
 
 `app/(protected)/activity/[entityId]/index.tsx` is one route with branching render, not
@@ -387,7 +399,8 @@ css's `--radius-md`), applied via `className="rounded-md"` since heroui-native's
 `rounded-3xl` (they extend the same `Surface` primitive). This is applied per call
 site, not a global CSS override — search for `rounded-md` in any of those components
 before adding a new one to see the pattern. Fully round shapes (an avatar, a pill/badge,
-a circular FAB) are exempt — this rule is about rectangular surfaces only.
+a circular FAB, a carousel dot indicator — the landing carousel's is the current
+example) are exempt — this rule is about rectangular surfaces only.
 
 **Derived data fed to a third-party list/calendar prop is always memoized off its
 source query data, never recomputed inline in the render body.** `react-native-

@@ -44,6 +44,36 @@ longer pending.
   `loading`, then plays a brief `SplashReveal` animation. Wraps the tree in
   `GestureHandlerRootView` → `ConvexAuthProvider` → `HeroUINativeProvider` → navigation
   `ThemeProvider`.
+  **Splash → reveal → gate flow**: `RootNavigator` records its own mount time in a ref
+  and calls `SplashScreen.hideAsync()` the instant `gate.status` first leaves
+  `'loading'`. At that point it also decides whether to play `SplashReveal`: if less
+  than 2000ms elapsed since mount, the reveal plays (its own animation runs ~700ms,
+  under the 800ms cap); past that, `showReveal` is never set and the app goes straight
+  to the resolved route. This is deliberately a one-way check, not a loading gate — a
+  slow network already made the student wait past the reveal's own runtime, so playing
+  it on top would only add more waiting for nothing (see CLAUDE.md's Comment policy:
+  this is the kind of non-obvious tradeoff worth a comment, and there is one at the
+  call site).
+- `app/(landing)/` — `index.tsx`, a 3-slide carousel (`react-native-reanimated-
+  carousel`) shown ONCE per device install, before `(auth)` — see "Onboarding gate"
+  below for exactly when. Not per-account: the gate reads a device-local AsyncStorage
+  flag (`lib/landingStorage.ts`'s `termio.hasSeenLanding`), not anything tied to the
+  signed-in user, so a fresh account on a device that's already seen the carousel skips
+  straight to `(auth)`. `lib/landingStorage.ts` exposes this as a tiny external store
+  (`subscribeHasSeenLanding`/`getHasSeenLandingSnapshot`, read via `useSyncExternalStore`
+  in `use-auth-gate.ts`) rather than plain component state, specifically so that calling
+  `markLandingSeen()` on the carousel's last slide flips the gate immediately, in place,
+  with no explicit navigation call and no remount — the same way signing out already
+  swaps `(protected)` for `(auth)` purely by changing what the gate returns. The
+  AsyncStorage read itself is deferred to the first `subscribe` call rather than run at
+  module scope — Expo web's static export pre-renders this module on Node during
+  SSR, where AsyncStorage's web shim touches `window` and throws; deferring it to a
+  client-side `useSyncExternalStore` subscribe keeps the module SSR-safe. Slides:
+  Termio's own mark (`mark.png`) on slide 1, token-coloured icon-in-circle compositions
+  (same "oversized circle behind an `IconSymbol`" grammar as the Alerts tab's empty
+  state) on slides 2–3 — no separate illustration set introduced for this. "Skip" (top-
+  right, slides 1–2 only) and slide 3's "Get started" both call `markLandingSeen()`;
+  "Next" on slides 1–2 just advances the carousel via its `ICarouselInstance` ref.
 - `app/(auth)/` — `index.tsx` (login/register tabs, no link to the admin app),
   `verify-email.tsx`, `forgot-password.tsx` (interface-only, deliberately not wired to
   the backend — see Comment policy example below). `_layout.tsx` additionally redirects
@@ -324,11 +354,21 @@ One hook owns the entire redirect decision; `app/_layout.tsx` and every group's
 `_layout.tsx` read it instead of re-deriving auth/profile/semester state themselves.
 Sequence, in order:
 
-1. Logged out → `(auth)` (login/register)
-2. Logged in, email unverified → `(auth)/verify-email`
-3. Logged in, verified, no `studentProfile` row → `(onboarding)/profile-setup`
-4. Logged in, verified, has profile, no active semester → `(onboarding)` (waiting screen)
-5. Logged in, verified, has profile, semester active → `(protected)/(tabs)`
+1. Device hasn't seen the `(landing)` carousel yet AND logged out → `(landing)`
+2. Logged out (device has seen `(landing)`, or never gets there because it's already
+   logged in — see below) → `(auth)` (login/register)
+3. Logged in, email unverified → `(auth)/verify-email`
+4. Logged in, verified, no `studentProfile` row → `(onboarding)/profile-setup`
+5. Logged in, verified, has profile, no active semester → `(onboarding)` (waiting screen)
+6. Logged in, verified, has profile, semester active → `(protected)/(tabs)`
+
+Step 1 only ever intercepts the logged-out branch — a logged-in session never gets
+routed to `(landing)`, regardless of whether that device's flag happens to be unset
+(in practice this can't really happen: a session implies a prior successful login,
+which implies the device already passed through here once). `hasSeenLanding` is read
+via `useSyncExternalStore` (see `app/(landing)/`'s bullet above), not local state, so
+the gate re-evaluates the instant the carousel marks itself seen — no reload needed,
+same as any other gate transition.
 
 `unverified` is defensive rather than reachable in normal use — Convex Auth never
 issues session tokens for an unverified Password-provider account, so the real
@@ -392,7 +432,8 @@ heroui-native's `Card`, `ListGroup`, `Dialog.Content`, and `Select.Content` all 
 to a much larger `rounded-3xl` (they extend the same `Surface` primitive) — this isn't
 overridden globally in CSS, it's applied at every usage; grep `rounded-md` across
 `components/` for the pattern before adding a new grouped surface. See AGENTS.md's
-Design posture for the full rule and the fully-round exemptions (avatars, pills, FABs).
+Design posture for the full rule and the fully-round exemptions (avatars, pills, FABs,
+dot indicators — `app/(landing)/index.tsx`'s `DotIndicator` is the current example).
 
 ### Backend (`convex/`)
 

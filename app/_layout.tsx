@@ -4,7 +4,7 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { HeroUINativeProvider } from 'heroui-native';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import 'react-native-reanimated';
@@ -45,11 +45,17 @@ function RootNavigator() {
   const gate = useAuthGate();
   const [nativeSplashHidden, setNativeSplashHidden] = useState(false);
   const [showReveal, setShowReveal] = useState(false);
+  const mountedAtRef = useRef(Date.now());
 
   useEffect(() => {
     if (gate.status !== 'loading' && !nativeSplashHidden) {
       setNativeSplashHidden(true);
-      setShowReveal(true);
+      // Polish, not a loading gate (see CLAUDE.md's splash-reveal flow): a slow
+      // network already made the student wait past the reveal's own ~700ms runtime,
+      // so playing it on top of that wait would only add more waiting for nothing —
+      // skip straight through instead of stacking a second delay.
+      const elapsedMs = Date.now() - mountedAtRef.current;
+      setShowReveal(elapsedMs <= 2000);
       SplashScreen.hideAsync();
     }
   }, [gate.status, nativeSplashHidden]);
@@ -61,6 +67,9 @@ function RootNavigator() {
   return (
     <>
       <Stack>
+        <Stack.Protected guard={gate.status === 'landing'}>
+          <Stack.Screen name="(landing)" options={{ headerShown: false }} />
+        </Stack.Protected>
         <Stack.Protected
           guard={gate.status === 'unauthenticated' || gate.status === 'unverified'}>
           <Stack.Screen name="(auth)" options={{ headerShown: false }} />
