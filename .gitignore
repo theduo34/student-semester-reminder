@@ -42,6 +42,13 @@ uniwind-types.d.ts
 
 app-example
 
+# google-services.json is safe to commit (public identifiers only, per Expo's docs) and
+# EAS Build's cloud archive only includes git-tracked files — ignoring it here silently
+# broke Android builds. The genuinely sensitive Firebase credential (the FCM V1 service
+# account key) never lives in the repo at all; it's uploaded straight to EAS via
+# `eas credentials`, so that pattern below still applies.
+*-firebase-adminsdk-*.json
+
 # generated native folders
 /ios
 /android

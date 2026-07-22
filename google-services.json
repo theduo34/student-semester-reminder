@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "404920588255",
+    "project_id": "termio-8a211",
+    "storage_bucket": "termio-8a211.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:404920588255:android:26f12ef7dfcdd1e297966a",
+        "android_client_info": {
+          "package_name": "com.termio.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDzTX8VnLcbmzV_uDiJ9xXHJSTmA69vE3A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
