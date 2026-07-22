@@ -13,6 +13,7 @@ import { Screen } from '@/components/ui/Screen';
 import { api } from '@/convex/_generated/api';
 import { Doc, Id } from '@/convex/_generated/dataModel';
 import { useAppToast } from '@/hooks/use-app-toast';
+import { ENTITY_TYPE_TO_ROUTE_TYPE } from '@/lib/entityRouting';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -49,12 +50,6 @@ function bucketAlerts(alerts: AlertRow[]): { label: (typeof BUCKET_LABELS)[numbe
   }
   return BUCKET_LABELS.map((label) => ({ label, items: buckets[label] })).filter((bucket) => bucket.items.length > 0);
 }
-
-const ENTITY_TYPE_TO_ROUTE_TYPE: Record<AlertRow['entityType'], 'course' | 'semester' | 'personal'> = {
-  courseActivities: 'course',
-  semesterActivities: 'semester',
-  personalReminders: 'personal',
-};
 
 // Alerts feed — a client-derived log (see AGENTS.md's Alerts feed section), not real OS
 // push notifications. Rows are written centrally by hooks/useAlertsSync.ts (wired at

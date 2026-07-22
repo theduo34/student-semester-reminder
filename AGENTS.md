@@ -64,8 +64,11 @@ yet, see CLAUDE.md.
   Uniwind — `className` with semantic tokens (`bg-background`, `text-foreground`,
   `bg-danger`, `text-muted`, `border-border`, ...) defined in `global.css`. No
   `StyleSheet.create` objects.
-- `expo-notifications` for locally-scheduled reminders (channels: critical / important /
-  flexible, see priority model below)
+- `expo-notifications` for both locally-scheduled reminders (channels: critical /
+  important / flexible, see priority model below — local scheduling itself isn't built
+  yet, see the Alerts feed section's flagged gap) and real push delivery for the
+  `new_event`/`overdue` alert kinds (see CLAUDE.md's Push architecture section) — same
+  library, same three channels, two different trigger paths
 - `expo-calendar` for device-calendar sync; `react-native-calendars` (Wix) is the one
   calendar UI library for the project — the Calendar tab's month/week grids are a
   theming/composition job on top of its `Calendar`/`WeekCalendar`/`CalendarProvider`,
@@ -214,33 +217,50 @@ going forward):
 
 ## Alerts feed
 
-The Alerts tab is a client-derived log, Convex-backed (the `alerts` table), not real OS
-push notifications — real server push (Expo push tokens + a Convex push action) stays a
-deliberate scope boundary, out for the MVP. Three kinds, one central write path:
+The Alerts tab is a client-derived log, Convex-backed (the `alerts` table). Two of its
+three kinds now also deliver real OS push (Expo push tokens + Convex actions — see
+CLAUDE.md's Push architecture section for the full pipeline); the Alerts row and the
+push notification coexist for those two — push is the immediate OS-level nudge, the
+Alerts row is the persistent record, neither replaces the other. Three kinds, one
+central write path for the row itself:
 
 - **`REMINDER_FIRED`** — a courseActivity/personalReminder's configured
   reminderPreferences interval has passed relative to its due time (courseActivity:
   `dueDate`; personalReminder: `startTime`, matching what an actual notification would
-  fire against). **Flagged gap**: no real on-device notification scheduling exists in
-  this app yet (`expo-notifications` isn't actually called anywhere to schedule
-  anything — see CLAUDE.md's `hooks/` section) — this kind is derived from data
-  (has the trigger time implied by the configured interval passed?) rather than
-  observing a real fired notification, the closest available approximation until local
-  scheduling is built as its own pass.
+  fire against). **Flagged gap, and deliberately never pushed**: no real on-device
+  notification scheduling exists in this app yet (`expo-notifications` isn't actually
+  called anywhere to schedule anything — see CLAUDE.md's `hooks/` section) — this kind
+  is derived from data (has the trigger time implied by the configured interval
+  passed?) rather than observing a real fired notification, the closest available
+  approximation until local scheduling is built as its own pass. Even once that pass
+  happens, this kind stays purely local — pushing it too would double-fire alongside
+  the local notification for the same trigger.
 - **`NEW_EVENT`** — a semesterActivities row created after the student's
   `studentProfiles.lastSeenAlertsAt`. A student's first-ever sync baselines this
   timestamp without alerting on the pre-existing catalogue, rather than dumping every
-  institutional event that existed before they signed up into their feed.
+  institutional event that existed before they signed up into their feed. Also pushed
+  in real time now (`convex/pushDelivery.ts#notifyNewEvent`, scheduled the moment a
+  semesterActivity is inserted) — `useAlertsSync`'s own detection stays as a fallback,
+  not removed.
 - **`OVERDUE`** — a courseActivity/personalReminder's `dueDate` has passed while not
   completed. Institutional events (semesterActivities) never generate this kind — they
-  have no completion concept to be "overdue" against.
+  have no completion concept to be "overdue" against. Also detected server-side now, by
+  a 15-minute cron (`convex/overdueSweep.ts`) that pushes as it logs — this catches the
+  transition even while the app isn't open, which the client-side check alone never
+  could. See CLAUDE.md's Push architecture section for the full dual-mechanism/dedup
+  story.
 
-All three are written by **`hooks/useAlertsSync.ts`**, the one place this logic lives —
-called once from the root layout, on mount/foreground/a 5-minute interval, not scattered
-per-screen. Any future alert source hooks in there too. Deduped server-side by
-`(userId, entityId, kind)` before insert (`convex/alerts.ts#create`), so a redundant
-sync pass (clock drift, a second foreground within the same interval) never produces a
-duplicate.
+`hooks/useAlertsSync.ts` is where the *client-side* detection for all three kinds
+lives — called once from the root layout, on mount/foreground/a 5-minute interval, not
+scattered per-screen. For `NEW_EVENT`/`OVERDUE` it's now a fallback alongside the
+server-side paths above, not the only path; for `REMINDER_FIRED` it's still the only
+path (see that kind's own note above). Every write, from either the client or the
+server, is deduped by `(userId, entityId, kind)` before insert
+(`convex/alerts.ts`'s shared `upsertAlert`, used by both the public `create` mutation
+and the internal `createForUser` the server-side paths call), so a redundant pass —
+clock drift, a second foreground within the same sync interval, the cron and the
+client both catching the same overdue transition — never produces a duplicate row, and
+only the first writer of the two ever triggers a push.
 
 **Schema note**: the alerts table also stores `title`/`subtitle`/`priority`, frozen at
 creation time — not re-derived from `entityId` on every read. A live join across three

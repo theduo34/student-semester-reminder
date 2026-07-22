@@ -12,6 +12,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Screen } from '@/components/ui/Screen';
 import { api } from '@/convex/_generated/api';
 import { useAppToast } from '@/hooks/use-app-toast';
+import { unregisterCurrentDeviceToken } from '@/lib/pushNotifications';
 import { formatIntervalsSummary } from '@/lib/reminderIntervals';
 
 const PRIORITY_ROWS = [
@@ -224,6 +225,11 @@ export default function SettingsScreen() {
         confirmLabel="Log out"
         onConfirm={async () => {
           try {
+            // Before signOut(), not after — unregisterPushToken is an authenticated
+            // mutation, so it has to run while the session is still valid. This
+            // prevents this device's push from landing on whichever different account
+            // logs in here next (see lib/pushNotifications.ts).
+            await unregisterCurrentDeviceToken();
             await signOut();
           } catch {
             showError('Could not log out — try again');

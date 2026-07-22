@@ -248,7 +248,16 @@ async function upsertSemesterActivity(
     .withIndex('by_semesterId', (q) => q.eq('semesterId', semesterId))
     .collect();
   if (existing.some((row) => row.title === title)) return;
-  await ctx.db.insert('semesterActivities', { semesterId, title, description, date });
+  const semesterActivityId = await ctx.db.insert('semesterActivities', { semesterId, title, description, date });
+  // Real push to every student's device — this is the defense demo path (see
+  // AGENTS.md's Push architecture section): re-running the seed against the preview
+  // deployment delivers an actual notification, not just a row in the alerts table.
+  // Scheduled rather than called directly — mutations can't make the external HTTP
+  // call a push send needs, only actions can, see convex/pushDelivery.ts.
+  await ctx.scheduler.runAfter(0, internal.pushDelivery.notifyNewEvent, {
+    semesterActivityId,
+    title,
+  });
 }
 
 async function upsertReminderPreferences(

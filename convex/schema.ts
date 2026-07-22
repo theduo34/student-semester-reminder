@@ -249,4 +249,20 @@ export default defineSchema({
   })
     .index('by_userId', ['userId'])
     .index('by_userId_entityId_kind', ['userId', 'entityId', 'kind']),
+
+  // Owned by this app — one row per (student, device). A student logged in on two
+  // devices gets two rows, not one overwritten row; convex/pushTokens.ts upserts by the
+  // exact (userId, token) pair, never by userId alone, so registering a second device
+  // never evicts the first. Read only by convex/pushDelivery.ts's sendPushToUser action
+  // (an internalQuery, never exposed to clients — see AGENTS.md's Security section for
+  // why "a client only ever sees its own data" isn't the same guarantee as "the server
+  // never hands another user's tokens to anyone").
+  pushTokens: defineTable({
+    userId: v.id('users'),
+    token: v.string(),
+    platform: v.union(v.literal('ios'), v.literal('android')),
+    updatedAt: v.number(),
+  })
+    .index('by_userId', ['userId'])
+    .index('by_userId_and_token', ['userId', 'token']),
 });

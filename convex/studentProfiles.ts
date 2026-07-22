@@ -1,7 +1,7 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
 import { v } from 'convex/values';
 
-import { MutationCtx, mutation, query } from './_generated/server';
+import { internalQuery, MutationCtx, mutation, query } from './_generated/server';
 import { Id } from './_generated/dataModel';
 
 // Its null result IS the "needs profile setup" onboarding gate — see
@@ -202,6 +202,21 @@ export const updateAcademicHierarchy = mutation({
         }
       }
     }
+  },
+});
+
+// System-only — read by convex/pushDelivery.ts's notifyNewEvent action to fan a new
+// semesterActivity out to every student. Single-institution MVP (see AGENTS.md's
+// Institution note): semesterActivities are institution-wide already, and neither
+// `semesters` nor `studentProfiles` carries an institutionId to narrow this by, so
+// "every student at this institution" is just every studentProfiles row. A second
+// institution would need both tables to carry institutionId before this could scope
+// correctly — flagged here rather than silently assumed forever.
+export const listAllUserIds = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const profiles = await ctx.db.query('studentProfiles').collect();
+    return profiles.map((profile) => profile.userId);
   },
 });
 

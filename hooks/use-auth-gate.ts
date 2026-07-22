@@ -1,4 +1,5 @@
 import { useConvexAuth, useQuery } from 'convex/react';
+import * as Notifications from 'expo-notifications';
 import { useSyncExternalStore } from 'react';
 
 import { api } from '@/convex/_generated/api';
@@ -22,6 +23,10 @@ export function useAuthGate(): AuthGate {
     getHasSeenLandingSnapshot,
     getHasSeenLandingSnapshot,
   );
+  // undefined = not resolved yet, null = resolved, nothing pending — only a genuine
+  // response object should bypass landing, so treat both non-response states as "no."
+  const lastNotificationResponse = Notifications.useLastNotificationResponse();
+  const cameFromNotificationTap = Boolean(lastNotificationResponse);
   const { isLoading: authLoading, isAuthenticated } = useConvexAuth();
   const viewer = useQuery(api.users.viewer, isAuthenticated ? {} : 'skip');
   const isVerified = viewer?.emailVerificationTime !== undefined;
@@ -42,8 +47,12 @@ export function useAuthGate(): AuthGate {
     // per-account one — a device that's already seen it skips straight to (auth), even
     // for a brand new account on that same device. Logged-in states below never
     // recheck this: if a session somehow exists on a device that hasn't marked landing
-    // seen, that's already a returning device in every way that matters.
-    return hasSeenLanding ? { status: 'unauthenticated' } : { status: 'landing' };
+    // seen, that's already a returning device in every way that matters. A device
+    // opened via a tapped push notification also skips it regardless — "notifications
+    // go directly into the app" (see CLAUDE.md's push architecture section) beats
+    // "device hasn't onboarded yet" (in practice this rarely applies: push only ever
+    // reaches a device that was authenticated when its token was registered).
+    return hasSeenLanding || cameFromNotificationTap ? { status: 'unauthenticated' } : { status: 'landing' };
   }
   if (viewer === undefined) {
     return { status: 'loading' };

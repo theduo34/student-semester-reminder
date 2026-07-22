@@ -6,12 +6,21 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_CONVEX_URL": "https://colorless-shepherd-537.convex.cloud"
+      },
       "ios": {
         "simulator": true
       }
     },
     "preview": {
       "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_CONVEX_URL": "https://groovy-weasel-220.convex.cloud"
+      },
       "ios": {
         "simulator": true
       }

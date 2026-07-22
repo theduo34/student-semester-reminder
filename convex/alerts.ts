@@ -1,16 +1,45 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
-import { v } from 'convex/values';
+import { Infer, v } from 'convex/values';
 
 import { Id } from './_generated/dataModel';
-import { MutationCtx, mutation, query } from './_generated/server';
+import { internalMutation, MutationCtx, mutation, query } from './_generated/server';
 import { alertKindValidator, entityType, priorityValidator } from './schema';
 
-// Admin-originated "new institutional event" alerts can't be pushed server-side in the
-// MVP — that would need real Expo push infrastructure, out of scope for now (see
-// AGENTS.md's Alerts feed section). `listBySemester` below (unrelated to the alerts
-// table — reads semesterActivities directly) is what Calendar/Home use to merge
-// institutional events into their own displays; it predates and is independent of the
-// alerts feed built here.
+type AlertContentArgs = {
+  entityType: Infer<typeof entityType>;
+  entityId: string;
+  kind: Infer<typeof alertKindValidator>;
+  title: string;
+  subtitle: string;
+  priority?: Infer<typeof priorityValidator>;
+};
+
+// Shared by `create` (public, auth-derived owner) and `createForUser` (internal,
+// system-trusted owner — called from convex/pushDelivery.ts and convex/overdueSweep.ts,
+// which act on behalf of a student without that student making the request). Same
+// (userId, entityId, kind) dedup either way, so a server-triggered alert and the
+// client's own useAlertsSync fallback never produce two rows for the same transition —
+// whichever writes first wins, the other finds `created: false` and moves on.
+async function upsertAlert(ctx: MutationCtx, userId: Id<'users'>, args: AlertContentArgs) {
+  const existing = await ctx.db
+    .query('alerts')
+    .withIndex('by_userId_entityId_kind', (q) =>
+      q.eq('userId', userId).eq('entityId', args.entityId).eq('kind', args.kind),
+    )
+    .unique();
+  if (existing !== null) {
+    return { alertId: existing._id, created: false };
+  }
+  const alertId = await ctx.db.insert('alerts', { userId, ...args, createdAt: Date.now(), isRead: false });
+  return { alertId, created: true };
+}
+
+// `listBySemester` below is unrelated to the alerts table — it reads semesterActivities
+// directly, and is what Calendar/Home use to merge institutional events into their own
+// displays. It predates and is independent of the alerts feed built here. Real push
+// delivery for new institutional events is handled elsewhere entirely — see
+// convex/pushDelivery.ts's notifyNewEvent and CLAUDE.md's Push architecture section —
+// not by this query.
 export const listBySemester = query({
   args: { semesterId: v.id('semesters') },
   handler: async (ctx, { semesterId }) => {
@@ -69,16 +98,31 @@ export const create = mutation({
     if (userId === null) {
       throw new Error('Not authenticated');
     }
-    const existing = await ctx.db
-      .query('alerts')
-      .withIndex('by_userId_entityId_kind', (q) =>
-        q.eq('userId', userId).eq('entityId', args.entityId).eq('kind', args.kind),
-      )
-      .unique();
-    if (existing !== null) {
-      return existing._id;
-    }
-    return ctx.db.insert('alerts', { userId, ...args, createdAt: Date.now(), isRead: false });
+    const { alertId } = await upsertAlert(ctx, userId, args);
+    return alertId;
+  },
+});
+
+// Internal counterpart to `create` — same dedup, but the owner is a trusted server-
+// supplied userId instead of the caller's own identity. Used by convex/pushDelivery.ts
+// (new_event fan-out) and convex/overdueSweep.ts (the overdue cron), both of which are
+// logging an alert *for* a student the request isn't coming from. Never exposed to
+// clients (internalMutation) — a client passing an arbitrary userId here would be
+// exactly the kind of cross-user write AGENTS.md's Security section rules out.
+// Returns `created` so callers only send a push on a genuinely new transition, not on
+// every redundant cron pass or a pass that raced the client's own useAlertsSync.
+export const createForUser = internalMutation({
+  args: {
+    userId: v.id('users'),
+    entityType,
+    entityId: v.string(),
+    kind: alertKindValidator,
+    title: v.string(),
+    subtitle: v.string(),
+    priority: v.optional(priorityValidator),
+  },
+  handler: async (ctx, { userId, ...args }) => {
+    return upsertAlert(ctx, userId, args);
   },
 });
 
@@ -92,6 +136,30 @@ export const markRead = mutation({
     const alert = await requireOwnedAlert(ctx, userId, alertId);
     if (!alert.isRead) {
       await ctx.db.patch(alertId, { isRead: true });
+    }
+  },
+});
+
+// Tapping a push notification (see hooks/use-notification-observer.ts) only carries
+// entityType/entityId in its data payload, not the specific alert's _id — this looks
+// the alert up the same way alerts.create's own dedup check does, via the
+// by_userId_entityId_kind index, rather than requiring the client to already know an
+// id it was never given. Silent no-op if no matching alert exists (e.g. the student
+// had already deleted it) — same "not a user action, so missing isn't an error" stance
+// as create's own idempotency.
+export const markReadByEntity = mutation({
+  args: { entityId: v.string(), kind: alertKindValidator },
+  handler: async (ctx, { entityId, kind }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) {
+      throw new Error('Not authenticated');
+    }
+    const alert = await ctx.db
+      .query('alerts')
+      .withIndex('by_userId_entityId_kind', (q) => q.eq('userId', userId).eq('entityId', entityId).eq('kind', kind))
+      .unique();
+    if (alert !== null && !alert.isRead) {
+      await ctx.db.patch(alert._id, { isRead: true });
     }
   },
 });

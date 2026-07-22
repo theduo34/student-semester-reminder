@@ -1,7 +1,7 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
 import { v } from 'convex/values';
 
-import { mutation, query } from './_generated/server';
+import { internalQuery, mutation, query } from './_generated/server';
 import { activityStatusValidator } from './schema';
 
 // This app owns this table (assignments, quizzes, projects, exams).
@@ -49,6 +49,31 @@ export const remove = mutation({
   args: { id: v.id('courseActivities') },
   handler: async (ctx, { id }) => {
     await ctx.db.delete(id);
+  },
+});
+
+// System-only — read by convex/overdueSweep.ts's cron. Full-table scan, filtered in
+// memory: this app's scale (one class's worth of demo data) doesn't warrant a dueDate
+// index and the query-time complexity that would come with one, but it's a real limit —
+// flagged, not silently fine forever, same spirit as this file's own studentId TODO
+// above.
+export const listOverduePending = internalQuery({
+  args: { now: v.number() },
+  handler: async (ctx, { now }) => {
+    const rows = await ctx.db.query('courseActivities').collect();
+    const overdue = rows.filter((row) => row.status === 'PENDING' && row.dueDate < now);
+    return Promise.all(
+      overdue.map(async (row) => {
+        const course = await ctx.db.get(row.courseId);
+        return {
+          _id: row._id,
+          studentId: row.studentId,
+          title: row.title,
+          priority: row.priority,
+          courseLabel: course ? `${course.courseCode} — ${course.courseTitle}` : 'Course activity',
+        };
+      }),
+    );
   },
 });
 

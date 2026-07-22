@@ -1,7 +1,7 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
 import { v } from 'convex/values';
 
-import { MutationCtx, mutation, query } from './_generated/server';
+import { internalQuery, MutationCtx, mutation, query } from './_generated/server';
 import { Id } from './_generated/dataModel';
 import { priorityValidator } from './schema';
 
@@ -152,6 +152,29 @@ export const remove = mutation({
     }
     await requireOwnedReminder(ctx, userId, reminderId);
     await ctx.db.delete(reminderId);
+  },
+});
+
+// System-only — read by convex/overdueSweep.ts's cron. Same full-table-scan caveat as
+// courseActivities.ts's listOverduePending — fine at this app's scale, flagged for if
+// that ever changes.
+export const listOverduePending = internalQuery({
+  args: { now: v.number() },
+  handler: async (ctx, { now }) => {
+    const rows = await ctx.db.query('personalReminders').collect();
+    const overdue = rows.filter((row) => !row.isCompleted && row.dueDate < now);
+    return Promise.all(
+      overdue.map(async (row) => {
+        const course = row.courseId ? await ctx.db.get(row.courseId) : null;
+        return {
+          _id: row._id,
+          userId: row.userId,
+          title: row.title,
+          priority: row.priority,
+          courseLabel: course ? `${course.courseCode} — ${course.courseTitle}` : 'Personal reminder',
+        };
+      }),
+    );
   },
 });
 

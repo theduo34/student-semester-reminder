@@ -28,10 +28,75 @@ No test runner is configured (no `test` script in `package.json`).
   <key>`. Without it, `signIn(..., { flow: "signUp" })` creates the account but throws
   on the verification-email send (`Missing API key`), surfaced to the user as a generic
   "Something went wrong" — expected until this is set, not a bug to route around.
+- **Android push credentials (Firebase/FCM V1)** — a real gap this pass surfaced, not
+  one the original push task anticipated: as of Expo's current docs, Android push
+  through Expo's push service needs a **Firebase project's `google-services.json`**
+  (path already wired at `android.googleServicesFile` in `app.json`, but the file
+  itself isn't in the repo — drop it in once you have it) **and** a **Firebase service
+  account JSON key uploaded to EAS** (`eas credentials` → Android → your build profile
+  → Google Service Account → upload the key; needs your own Firebase/Google Cloud
+  account, not something this session can do on your behalf). Without both, Android
+  push tokens can still register, but Expo's push service will fail to actually deliver
+  to Android devices — this blocks the demo path, not just iOS.
+- **iOS push credentials (APNs)** — as previously scoped: Apple Developer account
+  signup is in progress; nothing to do here until that's issued, see this file's Push
+  architecture section.
+- **A physical Android device (or emulator) with `adb` visibility** — needed for the
+  actual "development build installed, push arrives" test (see Testing below). Not
+  present in this session's environment when the push pass was built — the code is
+  complete and typechecked, but the on-device delivery test itself has not been run yet
+  and needs to happen on your machine.
 
-`npx convex dev`, `npx @convex-dev/auth` (JWT signing keys), and the first `npx expo
-start` (which generates `uniwind-types.d.ts`/`expo-env.d.ts`) have all been run — no
-longer pending.
+`npx convex dev`, `npx @convex-dev/auth` (JWT signing keys), the first `npx expo
+start` (which generates `uniwind-types.d.ts`/`expo-env.d.ts`), and `eas init` (which
+created and linked the `@theduo34/termio` EAS project, `extra.eas.projectId` in
+`app.json`) have all been run — no longer pending.
+
+## Deployments
+
+Two Convex deployments exist for this project:
+
+- **dev** (`colorless-shepherd-537`, selected via `.env.local`'s `CONVEX_DEPLOYMENT`) —
+  the ongoing-development deployment `npx convex dev` watches and pushes to on every
+  save. `npm start`/`npm run android`/`npm run ios`/`npm run web` all talk to this one
+  by default.
+- **preview** (`groovy-weasel-220`, reference `preview/preview`) — a separate, stable
+  deployment for pre-defense demo/testing, created via `npx convex deployment create
+  preview --type preview`. Not watched automatically — push code to it explicitly with
+  `npx convex deploy --env-file .env.preview.local` (a deploy key scoped to just this
+  deployment, created via `npx convex deployment token create preview-deploy-key
+  --deployment preview/preview --save-env .env.preview.local`; that file is gitignored
+  via the existing `.env*.local` glob, same as `.env.local` itself never being
+  committed).
+- Both deployments have their own **JWT signing keys** (`npx @convex-dev/auth
+  --preview-name preview`, already run) — these are deliberately NOT shared between
+  deployments, unlike `AUTH_RESEND_KEY` below: a shared JWT keypair would mean a session
+  token minted on one deployment would validate on the other, which defeats the point
+  of having two separate deployments.
+- **`AUTH_RESEND_KEY`** is the one env var that genuinely is the same value on both —
+  it's a third-party API key, not deployment-specific state — so it was copied
+  dev → preview once via `npx convex env get AUTH_RESEND_KEY | npx convex env set
+  AUTH_RESEND_KEY --deployment preview/preview` (piped, not typed, so the key value
+  never appears in shell history).
+- **`EXPO_PUBLIC_CONVEX_URL`** is per-deployment, always — the client only ever talks to
+  one deployment at a time. Local dev reads it from `.env.local`; `eas.json`'s
+  `development`/`preview` build profiles each set it explicitly under their own `env`
+  block, so an EAS cloud build always points at the deployment matching its profile
+  without needing `.env.local` to exist inside that build.
+- **Switching which deployment a one-off `npx convex` command targets**: default (no
+  flags) always follows `.env.local`'s `CONVEX_DEPLOYMENT`, i.e. dev. Pass `--env-file
+  .env.preview.local` (works for `deploy`/`run`) or `--deployment preview/preview`
+  (the `env` command specifically) to target preview instead — never edit `.env.local`
+  itself for a one-off, that would silently redirect `npx convex dev`'s live watcher.
+- **The seed script** (`convex/seed.ts`) runs against whichever deployment the command
+  targets — `npx convex run seed:seedAll '{"iAmSure": true}'` (dev, default) or the same
+  command plus `--env-file .env.preview.local` (preview). Its guard is the `iAmSure`
+  confirmation flag, not a deployment-type check — Convex functions have no built-in way
+  to ask "am I running on dev, preview, or prod," so the guard is deliberately
+  permission-based (a human has to type `iAmSure: true`) rather than environment-based.
+  That already makes it work unmodified on both dev and preview; a harder technical
+  block would only matter once a real production deployment exists to block, which it
+  doesn't yet.
 
 ## Architecture
 
@@ -347,6 +412,108 @@ Activity Details) holds "Clear all alerts" — the one action here that *does* g
 **Empty state** — soft `accent-soft` circle behind a bell icon, "You're all up to
 date," no CTA (there's nothing for the student to do to produce alerts — a good state,
 not a dead end). Shown only when `listMine` returns zero rows.
+
+### Push architecture (Android + iOS, cross-platform code)
+
+Real Expo push covers exactly two of the Alerts feed's three kinds — `NEW_EVENT` and
+`OVERDUE`. `REMINDER_FIRED` stays purely local (an on-device `expo-notifications`
+schedule — not yet actually implemented, see the Alerts feed section's flagged gap
+above) and never goes through this pipeline; pushing it too would double-fire
+alongside the eventual local notification for the same trigger.
+
+**Client — token lifecycle** (`lib/pushNotifications.ts` + `hooks/
+usePushRegistration.ts`):
+- `usePushRegistration()`, called once from `app/_layout.tsx`'s `RootNavigator`
+  (alongside `useAlertsSync`/`useNotificationObserver`), registers this device's token
+  once auth resolves and re-registers on the rare token-rotation event
+  (`Notifications.addPushTokenListener`).
+- `lib/pushNotifications.ts` owns permission handling (respects a denial —
+  `termio.pushPermissionDenied` in AsyncStorage — rather than re-prompting every
+  launch), Android notification channel registration (`critical`/`important`/
+  `flexible`, mirroring the app's priority tiers rather than an activity-type grouping
+  — the same channel vocabulary local reminder-fired scheduling will register against
+  once it's built), and the actual `Notifications.getExpoPushTokenAsync({projectId})`
+  call (`projectId` from `Constants.expoConfig.extra.eas.projectId`, set by `eas
+  init`). Every function here runs identically on iOS and Android — no `Platform.OS`
+  branch in the logic itself, just one up-front `isPushCapablePlatform()` boundary
+  check (push isn't meaningful on web).
+- Registration calls `api.pushTokens.registerPushToken` directly via the shared
+  `convex` client (`convex.mutation(...)`), not `useMutation` — this also needs to run
+  from the token-rotation listener's callback and (for unregister) from the logout
+  flow, neither of which are inside a component's render.
+- **Logout** calls `lib/pushNotifications.ts#unregisterCurrentDeviceToken()`
+  explicitly, *before* `signOut()` (see Settings' logout `ConfirmDialog`) —
+  `unregisterPushToken` is an authenticated mutation, so it has to run while the
+  session is still valid, not react to it having already cleared. That's why it's an
+  explicit call at the call site, not a `useEffect` cleanup keyed on auth state.
+
+**Schema** — `pushTokens` (`userId`, `token`, `platform: "ios"|"android"`,
+`updatedAt`), indexed by `userId` and by the compound `(userId, token)` upsert key. One
+row per (student, device) — logging in on a second device adds a second row rather than
+overwriting the first.
+
+**Backend — delivery** (`convex/pushDelivery.ts`, all `internalAction`, never
+client-callable):
+- `sendPushToUser` — the general single-user send. Looks up all of that user's
+  `pushTokens` (via `pushTokens.listForUser`, an `internalQuery`), POSTs to
+  `https://exp.host/--/api/v2/push/send`, and prunes any token Expo reports as
+  `DeviceNotRegistered` (`pushTokens.removeToken`). Never throws on a partial or total
+  failure — a dead token or an unreachable Expo endpoint shouldn't fail whatever
+  triggered the send, since the Alerts row it accompanies is already durable regardless
+  (see below).
+- `notifyNewEvent` — fans a new `semesterActivity` out to every student (see
+  `studentProfiles.listAllUserIds`'s single-institution scoping caveat — there's no
+  `institutionId` on `semesters`/`studentProfiles` to narrow by yet).
+- `convex/overdueSweep.ts` — the overdue cron's sweep logic, calling the same
+  underlying `deliverToUser` helper that `pushDelivery.ts` exports.
+
+**Trigger points**:
+- **`new_event`** — wherever a `semesterActivity` is actually inserted schedules
+  `pushDelivery.notifyNewEvent` via `ctx.scheduler.runAfter(0, ...)` (mutations can't
+  make the external HTTP call a push send needs; only actions can). Today that's only
+  `convex/seed.ts#upsertSemesterActivity` — there's no separate Admin app yet (see
+  AGENTS.md's scope boundary) — so **re-running the seed against the preview
+  deployment is the actual defense-demo path**: it delivers a real push to whatever
+  device has a `pushTokens` row for the demo student, not just an Alerts-tab row.
+- **`overdue`** — `convex/crons.ts` runs `overdueSweep.run` every 15 minutes: a
+  full-table scan of `courseActivities`/`personalReminders` (flagged as a real scaling
+  limit in both `listOverduePending` queries — fine at this app's demo scale, not
+  something that'd hold up at real scale) for `PENDING`/not-completed rows past their
+  due date, logging + pushing each one. **`hooks/useAlertsSync.ts`'s client-side
+  overdue check is NOT removed** — it stays as a fallback so the Alerts feed still
+  fills in between cron runs (or if the cron is ever paused), and it can never
+  double-alert against the cron: both paths go through `alerts.createForUser`'s dedup
+  on `(userId, entityId, kind)` (`alerts.ts`'s shared `upsertAlert` helper), and only
+  the write that's actually new (`created: true`) triggers a push — whichever of the
+  two gets there first is the one that counts.
+- **`reminder_fired`** — no push, ever, by design. See the note at the top of this
+  section.
+
+**Tap handling** — `hooks/use-notification-observer.ts`'s
+`addNotificationResponseReceivedListener` handles local and push notifications
+identically (same `{entityType, entityId}` data shape either way, see
+`lib/entityRouting.ts`'s shared `ENTITY_TYPE_TO_ROUTE_TYPE`): marks the matching Alerts
+row read (`alerts.markReadByEntity` — the tap payload only carries `entityType`/
+`entityId`, not the alert's own `_id`, so this looks it up the same way `alerts.create`'s
+own dedup check does; the alert's `kind` is derived from `entityType` since this app's
+only two push-able kinds map 1:1 to entity type today — flagged in the file itself if
+that ever stops being true) and navigates to Activity Details. `app/_layout.tsx` and
+`hooks/use-auth-gate.ts` both separately read
+`Notifications.useLastNotificationResponse()` to skip the splash reveal animation and
+the `(landing)` carousel gate respectively when the app was opened via a tapped
+notification — "notifications go directly into the app" beats either piece of
+first-launch polish.
+
+**Testing surfaces**: push cannot be exercised in Expo Go (`npm start`'s default
+target) — a development build (`eas build --profile development --platform android`)
+or a preview build (`eas build --profile preview --platform android` — `eas.json`'s
+`preview` profile builds an `.apk` specifically, not an `.aab`, for easy sideloading)
+are the only two surfaces that receive real push. iOS build profiles exist in
+`eas.json` (simulator builds, which don't need Apple Developer signing) but a real push
+test needs a physical iOS device and APNs credentials, neither of which exist yet —
+see "Setup still required" above. Android push additionally needs Firebase/FCM V1
+credentials provisioned (also listed there) before any build's push will actually
+deliver, even though the token-registration code path works without them.
 
 ### Onboarding gate (`hooks/use-auth-gate.ts`)
 

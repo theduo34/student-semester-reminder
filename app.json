@@ -14,6 +14,7 @@
     },
     "android": {
       "package": "com.termio.app",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#0F3D73",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -47,7 +48,12 @@
         }
       ],
       "expo-secure-store",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "color": "#0F3D73"
+        }
+      ],
       [
         "expo-calendar",
         {
@@ -59,6 +65,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4cc799eb-1537-4641-8739-41e6500094cc"
+      }
+    },
+    "owner": "theduo34"
   }
 }
