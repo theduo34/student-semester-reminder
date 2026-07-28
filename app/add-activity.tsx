@@ -53,7 +53,12 @@ export default function AddReminderScreen() {
         title: values.title.trim(),
         description: values.description.trim() || undefined,
         courseId: values.courseId ?? undefined,
-        dueDate: values.dueDate.getTime(),
+        // dueDate is the real due instant, not the Date field's own raw value — see
+        // ReminderForm's withDay comment: the Date field only carries a meaningful
+        // year/month/day, its time-of-day is leftover from whenever the form opened.
+        // startTime already has that same day (ReminderForm keeps them in sync), so it's
+        // the accurate instant for both fields.
+        dueDate: values.startTime.getTime(),
         startTime: values.startTime.getTime(),
         endTime: values.endTime?.getTime(),
         priority: values.priority,

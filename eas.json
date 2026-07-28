@@ -19,7 +19,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_CONVEX_URL": "https://groovy-weasel-220.convex.cloud"
+        "EXPO_PUBLIC_CONVEX_URL": "https://grateful-starfish-783.convex.cloud"
       },
       "ios": {
         "simulator": true

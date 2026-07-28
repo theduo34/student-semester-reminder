@@ -83,7 +83,10 @@ export default function EditReminderScreen() {
         title: values.title.trim(),
         description: values.description.trim() || undefined,
         courseId: values.courseId,
-        dueDate: values.dueDate.getTime(),
+        // dueDate = startTime — see add-activity.tsx's matching comment; ReminderForm
+        // keeps the Date field's day in sync with startTime, so startTime is the one
+        // accurate due instant for both fields.
+        dueDate: values.startTime.getTime(),
         startTime: values.startTime.getTime(),
         endTime: values.endTime?.getTime() ?? null,
         priority: values.priority,

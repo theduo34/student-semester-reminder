@@ -54,49 +54,61 @@ created and linked the `@theduo34/termio` EAS project, `extra.eas.projectId` in
 
 ## Deployments
 
-Two Convex deployments exist for this project:
+Three Convex deployments exist for this project:
 
 - **dev** (`colorless-shepherd-537`, selected via `.env.local`'s `CONVEX_DEPLOYMENT`) —
   the ongoing-development deployment `npx convex dev` watches and pushes to on every
   save. `npm start`/`npm run android`/`npm run ios`/`npm run web` all talk to this one
   by default.
-- **preview** (`groovy-weasel-220`, reference `preview/preview`) — a separate, stable
-  deployment for pre-defense demo/testing, created via `npx convex deployment create
-  preview --type preview`. Not watched automatically — push code to it explicitly with
-  `npx convex deploy --env-file .env.preview.local` (a deploy key scoped to just this
-  deployment, created via `npx convex deployment token create preview-deploy-key
-  --deployment preview/preview --save-env .env.preview.local`; that file is gitignored
-  via the existing `.env*.local` glob, same as `.env.local` itself never being
-  committed).
-- Both deployments have their own **JWT signing keys** (`npx @convex-dev/auth
-  --preview-name preview`, already run) — these are deliberately NOT shared between
-  deployments, unlike `AUTH_RESEND_KEY` below: a shared JWT keypair would mean a session
-  token minted on one deployment would validate on the other, which defeats the point
-  of having two separate deployments.
-- **`AUTH_RESEND_KEY`** is the one env var that genuinely is the same value on both —
-  it's a third-party API key, not deployment-specific state — so it was copied
-  dev → preview once via `npx convex env get AUTH_RESEND_KEY | npx convex env set
-  AUTH_RESEND_KEY --deployment preview/preview` (piped, not typed, so the key value
-  never appears in shell history).
+- **preview** (`groovy-weasel-220`, reference `preview/preview`) — a Convex "preview
+  deployment" (`npx convex deployment create preview --type preview`), originally set up
+  as the pre-defense demo/testing target. **No longer what `eas.json`'s `preview` build
+  profile points at** — Convex's Preview Deployments feature wasn't usable/visible on
+  this project's dashboard, so rather than fight that, the demo/build backend was
+  consolidated onto the project's actual **production** deployment instead (see below;
+  acceptable simplification for a school project, not a real production service with
+  real users). This deployment still exists and still has its own JWT keys/env vars, but
+  is currently unused by any build profile — not deleted, in case it's wanted again.
+- **production** (`grateful-starfish-783`, the project's default Convex production
+  deployment — no separate `create` step needed, `npx convex deploy` provisioned it) —
+  the actual backend behind `eas.json`'s `preview` build profile (an
+  internal-distribution `.apk`, not a Play Store release — the *build profile* name and
+  the *Convex deployment* name happen to differ, don't conflate them).
+  `EXPO_PUBLIC_CONVEX_URL` is wired in `eas.json` to
+  `https://grateful-starfish-783.convex.cloud`. Fully provisioned: `npx convex deploy`
+  (schema/functions pushed), `npx @convex-dev/auth --prod` (JWT signing keys —
+  deliberately not shared with dev/preview, same reasoning as below), `npx convex env
+  get AUTH_RESEND_KEY | npx convex env set AUTH_RESEND_KEY --prod` (the one env var
+  that IS shared, see below), and `npx convex run seed:seedAll '{"iAmSure": true}'
+  --prod` (demo student `demo@example.com`/`demo1234`, demo admin
+  `admin@example.com`/`admin1234` — same credentials as dev, just a separate row on a
+  separate deployment) have all been run.
+- **JWT signing keys** are per-deployment, deliberately not shared across any of the
+  three — a shared JWT keypair would mean a session token minted on one deployment would
+  validate on another, which defeats the point of separate deployments.
+- **`AUTH_RESEND_KEY`** is the one env var that genuinely is the same value everywhere —
+  it's a third-party API key, not deployment-specific state — copied dev → preview via
+  `npx convex env get AUTH_RESEND_KEY | npx convex env set AUTH_RESEND_KEY --deployment
+  preview/preview`, and dev → production via the `--prod` equivalent above (piped, not
+  typed, so the key value never appears in shell history).
 - **`EXPO_PUBLIC_CONVEX_URL`** is per-deployment, always — the client only ever talks to
   one deployment at a time. Local dev reads it from `.env.local`; `eas.json`'s
   `development`/`preview` build profiles each set it explicitly under their own `env`
   block, so an EAS cloud build always points at the deployment matching its profile
   without needing `.env.local` to exist inside that build.
 - **Switching which deployment a one-off `npx convex` command targets**: default (no
-  flags) always follows `.env.local`'s `CONVEX_DEPLOYMENT`, i.e. dev. Pass `--env-file
-  .env.preview.local` (works for `deploy`/`run`) or `--deployment preview/preview`
-  (the `env` command specifically) to target preview instead — never edit `.env.local`
-  itself for a one-off, that would silently redirect `npx convex dev`'s live watcher.
+  flags) always follows `.env.local`'s `CONVEX_DEPLOYMENT`, i.e. dev. Pass `--prod`
+  (works broadly — `deploy`/`run`/`env`/`dashboard`) to target production, or
+  `--env-file .env.preview.local`/`--deployment preview/preview` for the now-unused
+  preview deployment — never edit `.env.local` itself for a one-off, that would silently
+  redirect `npx convex dev`'s live watcher.
 - **The seed script** (`convex/seed.ts`) runs against whichever deployment the command
-  targets — `npx convex run seed:seedAll '{"iAmSure": true}'` (dev, default) or the same
-  command plus `--env-file .env.preview.local` (preview). Its guard is the `iAmSure`
-  confirmation flag, not a deployment-type check — Convex functions have no built-in way
-  to ask "am I running on dev, preview, or prod," so the guard is deliberately
-  permission-based (a human has to type `iAmSure: true`) rather than environment-based.
-  That already makes it work unmodified on both dev and preview; a harder technical
-  block would only matter once a real production deployment exists to block, which it
-  doesn't yet.
+  targets — `npx convex run seed:seedAll '{"iAmSure": true}'` (dev, default), plus
+  `--prod` or `--env-file .env.preview.local` for the other two. Its guard is the
+  `iAmSure` confirmation flag, not a deployment-type check — Convex functions have no
+  built-in way to ask "am I running on dev, preview, or prod," so the guard is
+  deliberately permission-based (a human has to type `iAmSure: true`) rather than
+  environment-based. That already makes it work unmodified on all three deployments.
 
 ## Architecture
 
@@ -377,12 +389,24 @@ entity's canonical calendar-day field, not necessarily the field shown on the ag
 row: `courseActivities`/`semesterActivities` have only one date field each
 (`dueDate`/`date`), but `personalReminders` has two — `dueDate` (the day it's for,
 used for bucketing) and `startTime` (when the notification fires, used for the
-agenda row's displayed time) — which can diverge, since `ReminderForm` edits them via
-two independent, uncorrelated pickers. Bucketing by `startTime` instead of `dueDate`
-was a real bug here (a personal reminder due on day N with a `startTime` that rolled
-into day N+1 silently vanished from day N's agenda); the fix is the `dueDate`/
-`displayTime` field split on `CalendarActivity` in the screen file — bucket by
-`dueDate` always, display by `displayTime`, never conflate the two. Both the bucketed
+agenda row's displayed time). Historically these were edited via two independent,
+uncorrelated pickers and could diverge in both day and time-of-day — that was a real
+bug, not just for Calendar's own bucketing (a personal reminder due on day N with a
+`startTime` that rolled into day N+1 silently vanished from day N's agenda) but for
+Home/Alerts' overdue detection too: `dueDate`'s leftover time-of-day (whatever moment
+the form happened to be open at) could already be in the past by save time, so a
+reminder due later *today* was immediately misread as overdue. Fixed at the source —
+`ReminderForm`'s Date field now re-stamps its year/month/day onto `startTime`/`endTime`
+whenever it changes (`withDay`), and both `app/add-activity.tsx` and
+`app/edit-activity/[entityId].tsx` send `dueDate: values.startTime.getTime()` (same
+instant as `startTime`, not the Date field's own raw value) — so for personalReminders
+`dueDate` and `startTime` are now always the same instant, and every consumer that reads
+`dueDate` as the authoritative deadline (`ActivityCard`'s overdue calc, the overdue
+cron, `useAlertsSync`'s client fallback) gets an accurate value without needing its own
+special case. The dueDate/displayTime split described below (bucket by `dueDate`,
+display by `displayTime`, never conflate the two) is still the right pattern and still
+in place — it's just no longer masking a data bug, since the two fields no longer
+diverge. Both the bucketed
 map and the `markedDates` object derived from it are `useMemo`'d off the same query
 results — recomputing `markedDates` on every render is a known performance sink
 specific to this library (see AGENTS.md's general version of this rule). Selecting a

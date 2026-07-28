@@ -24,6 +24,18 @@ function startOfDay(date: Date): number {
   return copy.getTime();
 }
 
+// The Date field and Time field are independent pickers — Date only ever touches
+// year/month/day, Time only ever touches hour/minute. Left alone, that means startTime
+// (and endTime) silently keep whatever day they defaulted to (whenever the form opened)
+// even after the student picks a different due date — so a reminder "due tomorrow" could
+// still carry today's date on its actual trigger instant. Re-stamping the day onto both
+// whenever Date changes is what keeps startTime/endTime honest as the real due instant.
+function withDay(time: Date, day: Date): Date {
+  const next = new Date(time);
+  next.setFullYear(day.getFullYear(), day.getMonth(), day.getDate());
+  return next;
+}
+
 // Shared validity check so Add and Edit gate their ModalHeader Save button identically
 // without duplicating the rule twice.
 export function isReminderFormValid(values: ReminderFormValues, minimumDueDate?: Date): boolean {
@@ -85,7 +97,13 @@ export function ReminderForm({ semesterId, values, onChange, minimumDueDate }: R
           label="Date"
           mode="date"
           value={values.dueDate}
-          onChange={(dueDate) => onChange({ dueDate })}
+          onChange={(dueDate) =>
+            onChange({
+              dueDate,
+              startTime: withDay(values.startTime, dueDate),
+              endTime: values.endTime ? withDay(values.endTime, dueDate) : null,
+            })
+          }
           minimumDate={minimumDueDate}
         />
         {dueDateInvalid ? <Text className="text-sm text-danger">Due date must be today or later.</Text> : null}
