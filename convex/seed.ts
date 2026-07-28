@@ -537,14 +537,23 @@ export const seedDemoStudent = internalAction({
       const created = await createAccount(ctx, {
         provider: 'password',
         account: { id: DEMO_STUDENT.authEmail, secret: DEMO_STUDENT.password },
+        // `emailVerified` (not `emailVerificationTime`) is what createAccount actually
+        // reads to mark the underlying authAccounts row verified — Password.js's signIn
+        // check (`!account.emailVerified`) reads that row, not `users.
+        // emailVerificationTime`. Without it, every login still re-triggered a
+        // verification email send even though the demo account looked "verified".
+        // @convex-dev/auth's own `createAccount` type only allows `users` table fields
+        // on `profile`, but the runtime (see users.js#defaultCreateOrUpdateUser)
+        // explicitly destructures `emailVerified`/`phoneVerified` off this object
+        // before spreading the rest onto `users` — the type just hasn't caught up,
+        // hence the cast.
         profile: {
           email: DEMO_STUDENT.authEmail,
           name: DEMO_STUDENT.name,
           role: 'student',
-          // Set directly rather than going through the ResendOTP verify flow — this is
-          // what makes the account ready-to-log-in with no OTP step for the demo.
           emailVerificationTime: Date.now(),
-        },
+          emailVerified: true,
+        } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
         shouldLinkViaEmail: true,
       });
       userId = created.user._id;

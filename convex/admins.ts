@@ -41,15 +41,23 @@ export const createAdminAccount = internalAction({
       const created = await createAccount(ctx, {
         provider: 'password',
         account: { id: email, secret: password },
+        // `emailVerified` (not `emailVerificationTime`) is what createAccount actually
+        // reads to mark the underlying authAccounts row verified — Password.js's signIn
+        // check (`!account.emailVerified`) reads that row, not `users.
+        // emailVerificationTime`. Without it, every login for an "already verified"
+        // admin still re-triggered a verification email send. @convex-dev/auth's own
+        // `createAccount` type only allows `users` table fields on `profile`, but the
+        // runtime (see users.js#defaultCreateOrUpdateUser) explicitly destructures
+        // `emailVerified`/`phoneVerified` off this object before spreading the rest
+        // onto `users` — the type just hasn't caught up, hence the cast.
         profile: {
           email,
           name,
           role: 'admin',
           institutionId,
-          // Set directly, same trick convex/seed.ts's seedDemoStudent uses — admins
-          // skip email verification entirely, they never get a verification email.
           emailVerificationTime: Date.now(),
-        },
+          emailVerified: true,
+        } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
         shouldLinkViaEmail: true,
       });
       return created.user._id;

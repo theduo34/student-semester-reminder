@@ -82,11 +82,18 @@ export default function ProfileSetupScreen() {
     <KeyboardAwareScreen
       header={<AppTopBar title="Profile Setup" />}
       contentContainerClassName="gap-8 pt-6 pb-6">
-      <Animated.View entering={stagger(0)}>
+      <Animated.View entering={stagger(0)} className="gap-1">
+        <Text className="text-lg font-bold text-foreground">Tell us where you study</Text>
+        <Text className="text-sm leading-5 text-muted">
+          A few quick selections so Termio only ever shows what actually applies to your class.
+        </Text>
+      </Animated.View>
+
+      <Animated.View entering={stagger(1)}>
         <AcademicHierarchyForm onStateChange={setHierarchy} />
       </Animated.View>
 
-      <Animated.View entering={stagger(1)} className="gap-4">
+      <Animated.View entering={stagger(2)} className="gap-4">
         <Text className="text-base font-bold text-foreground">Contact details</Text>
 
         <TextField
@@ -126,7 +133,7 @@ export default function ProfileSetupScreen() {
         />
       </Animated.View>
 
-      <Animated.View entering={stagger(2)} className="gap-4">
+      <Animated.View entering={stagger(3)} className="gap-4">
         <Button onPress={handleSubmit} isDisabled={!canSubmit} isLoading={isSubmitting}>
           Continue
         </Button>

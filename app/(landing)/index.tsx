@@ -2,6 +2,7 @@ import { Image } from 'expo-image';
 import { useThemeColor } from 'heroui-native';
 import { useRef, useState } from 'react';
 import { Pressable, Text, View, useWindowDimensions } from 'react-native';
+import Animated, { FadeIn, LinearTransition } from 'react-native-reanimated';
 import Carousel, { ICarouselInstance } from 'react-native-reanimated-carousel';
 
 import { Button } from '@/components/ui/Button';
@@ -37,38 +38,68 @@ const SLIDES: Slide[] = [
   },
 ];
 
+const BADGE_OUTER = 208;
+const BADGE_INNER = 156;
+
+// One consistent "halo ring + filled circle" badge behind every slide's visual — a
+// very-low-opacity accent ring for depth, a solid accent-soft circle for contrast, and
+// the mark/icon centred and shadowed on top. Slide 1 still wears the app's own
+// full-colour mark rather than a single-tone IconSymbol (see AGENTS.md's Design
+// posture — no second illustration style), but now sits in the exact same badge
+// geometry as slides 2–3 instead of floating bare, so all three read as one sequence
+// rather than two different treatments stitched together.
 function SlideIllustration({ slide, accent, accentSoft }: { slide: Slide; accent: string; accentSoft: string }) {
-  if (slide.image === 'mark') {
-    return <Image source={require('@/assets/images/mark.png')} style={{ width: 96, height: 96 }} contentFit="contain" />;
-  }
   return (
-    <View
-      className="items-center justify-center rounded-full"
-      style={{ width: 140, height: 140, backgroundColor: accentSoft }}>
-      <IconSymbol name={slide.icon!} size={56} color={accent} />
+    <View className="items-center justify-center" style={{ width: BADGE_OUTER, height: BADGE_OUTER }}>
+      <View
+        className="absolute rounded-full"
+        style={{ width: BADGE_OUTER, height: BADGE_OUTER, backgroundColor: accent, opacity: 0.07 }}
+      />
+      <View
+        className="items-center justify-center rounded-full"
+        style={{
+          width: BADGE_INNER,
+          height: BADGE_INNER,
+          backgroundColor: accentSoft,
+          shadowColor: accent,
+          shadowOffset: { width: 0, height: 10 },
+          shadowOpacity: 0.16,
+          shadowRadius: 20,
+          elevation: 6,
+        }}>
+        {slide.image === 'mark' ? (
+          <Image source={require('@/assets/images/mark.png')} style={{ width: 88, height: 88 }} contentFit="contain" />
+        ) : (
+          <IconSymbol name={slide.icon!} size={60} color={accent} />
+        )}
+      </View>
     </View>
   );
 }
 
 function LandingSlide({ slide, accent, accentSoft }: { slide: Slide; accent: string; accentSoft: string }) {
   return (
-    <View className="flex-1 items-center justify-center gap-10" style={{ paddingHorizontal: SCREEN_HORIZONTAL_PADDING }}>
+    <View className="flex-1 items-center justify-center gap-8" style={{ paddingHorizontal: SCREEN_HORIZONTAL_PADDING }}>
       <SlideIllustration slide={slide} accent={accent} accentSoft={accentSoft} />
-      <View className="gap-4">
+      <Animated.View entering={FadeIn.duration(300)} className="gap-3">
         <Text className="text-center text-2xl font-bold text-foreground">{slide.headline}</Text>
         <Text className="text-center text-base leading-6 text-muted">{slide.body}</Text>
-      </View>
+      </Animated.View>
     </View>
   );
 }
 
+// Active dot morphs into a pill (animated via Reanimated's layout transition, not a
+// hard cut) rather than every dot just swapping colour — a small, standard bit of
+// polish for a carousel indicator.
 function DotIndicator({ count, activeIndex }: { count: number; activeIndex: number }) {
   return (
     <View className="flex-row items-center justify-center gap-2">
       {Array.from({ length: count }, (_, index) => (
-        <View
+        <Animated.View
           key={index}
-          className={index === activeIndex ? 'size-2 rounded-full bg-accent' : 'size-2 rounded-full bg-muted/30'}
+          layout={LinearTransition.duration(250)}
+          className={index === activeIndex ? 'h-2 w-6 rounded-full bg-accent' : 'h-2 w-2 rounded-full bg-muted/30'}
         />
       ))}
     </View>
@@ -114,6 +145,8 @@ export default function LandingScreen() {
             width={width}
             height={carouselHeight}
             data={SLIDES}
+            mode="parallax"
+            modeConfig={{ parallaxScrollingScale: 0.92, parallaxScrollingOffset: 40 }}
             onSnapToItem={setActiveIndex}
             renderItem={({ item }) => <LandingSlide slide={item} accent={accent} accentSoft={accentSoft} />}
           />
@@ -122,7 +155,9 @@ export default function LandingScreen() {
 
       <View className="gap-6 pb-2" style={{ paddingHorizontal: SCREEN_HORIZONTAL_PADDING }}>
         <DotIndicator count={SLIDES.length} activeIndex={activeIndex} />
-        <Button onPress={isLastSlide ? finishLanding : () => carouselRef.current?.next()}>
+        <Button
+          onPress={isLastSlide ? finishLanding : () => carouselRef.current?.next()}
+          icon={isLastSlide ? 'checkmark' : undefined}>
           {isLastSlide ? 'Get started' : 'Next'}
         </Button>
       </View>

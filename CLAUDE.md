@@ -148,7 +148,16 @@ Three Convex deployments exist for this project:
   client-side `useSyncExternalStore` subscribe keeps the module SSR-safe. Slides:
   Termio's own mark (`mark.png`) on slide 1, token-coloured icon-in-circle compositions
   (same "oversized circle behind an `IconSymbol`" grammar as the Alerts tab's empty
-  state) on slides 2–3 — no separate illustration set introduced for this. "Skip" (top-
+  state) on slides 2–3 — no separate illustration set introduced for this. All three
+  slides now share one badge geometry (`SlideIllustration`'s `BADGE_OUTER`/
+  `BADGE_INNER` constants): a very-low-opacity accent halo ring behind an
+  `accent-soft`-filled circle with a soft shadow, mark/icon centred inside — the mark
+  used to float bare with no badge at all, which read as an inconsistent one-off next
+  to slides 2–3's circles; this is what fixed that. `Carousel` itself uses
+  `mode="parallax"` (a built-in `react-native-reanimated-carousel` layout, not hand-
+  rolled motion) for a subtle scale/slide transition between slides, and
+  `DotIndicator`'s active dot morphs into a pill via a Reanimated `LinearTransition`
+  layout animation rather than a hard colour swap. "Skip" (top-
   right, slides 1–2 only) and slide 3's "Get started" both call `markLandingSeen()`;
   "Next" on slides 1–2 just advances the carousel via its `ICarouselInstance` ref.
 - `app/(auth)/` — `index.tsx` (login/register tabs, no link to the admin app),
@@ -160,9 +169,14 @@ Three Convex deployments exist for this project:
   `components/features/onboarding/AcademicHierarchyForm.tsx` with `startingFrom`
   omitted, i.e. every field editable — see AGENTS.md's Profile editing section; the
   cascade itself is shared with the profile detail screen's academic-edit flow, not
-  inline here anymore) and `index.tsx` (waiting screen, shown once a profile exists but
-  no semester is active yet — "Check now" is reassurance only, the
-  `semesters.getActive` subscription already navigates away the instant one goes live).
+  inline here anymore, plus a one-line "Tell us where you study" intro above it) and
+  `index.tsx` (waiting screen, shown once a profile exists but no semester is active yet
+  — "Check now" is reassurance only, the `semesters.getActive` subscription already
+  navigates away the instant one goes live). The waiting screen's mark sits in the same
+  halo-ring badge geometry as the landing carousel's slides (`WaitingBadge`), animated
+  with a slow Reanimated pulse (`withRepeat`/`withTiming` on scale + opacity) so the
+  screen reads as "actively listening," not a static dead end; "Check now"'s reassurance
+  message is a small `success`-tinted pill with a checkmark icon rather than plain text.
   `_layout.tsx` redirects to `profile-setup` when the gate says `needsProfile`, mirroring
   `(auth)/_layout.tsx`'s pattern.
 - `app/(protected)/_layout.tsx` — `Stack` wrapping `(tabs)` plus every pushed detail
