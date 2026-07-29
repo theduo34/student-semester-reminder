@@ -6,13 +6,15 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useCSSVariable } from 'uniwind';
 
-import { ActivityCard, ActivityCardActivityType, ActivityCardKind, ActivityCardPriority } from '@/components/shared/ActivityCard';
+import { ActivityCard } from '@/components/shared/ActivityCard';
 import { HomeHeader } from '@/components/features/dashboard/HomeHeader';
 import { Button } from '@/components/ui/Button';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Screen } from '@/components/ui/Screen';
 import { api } from '@/convex/_generated/api';
+import { mapCourseActivity, mapPersonalReminder, mapSemesterActivity, UnifiedActivity } from '@/lib/activityMapping';
 import { toDateKey } from '@/lib/dateKey';
+import { computeSemesterProgress } from '@/lib/semesterProgress';
 
 const today = new Date().toLocaleDateString(undefined, {
   weekday: 'long',
@@ -27,28 +29,6 @@ function startOfLocalDay(ms: number): number {
   date.setHours(0, 0, 0, 0);
   return date.getTime();
 }
-
-function computeSemesterProgress(startDate: number, endDate: number, now: number) {
-  const total = endDate - startDate;
-  const elapsed = now - startDate;
-  const percent = total > 0 ? Math.min(100, Math.max(0, Math.round((elapsed / total) * 100))) : 0;
-  const msPerWeek = 7 * 24 * 60 * 60 * 1000;
-  const weeksRemaining = Math.max(0, Math.ceil((endDate - now) / msPerWeek));
-  return { percent, weeksRemaining };
-}
-
-type HomeActivity = {
-  id: string;
-  kind: ActivityCardKind;
-  type: 'course' | 'personal' | 'semester';
-  title: string;
-  dueDate: number;
-  displayTime: number;
-  endTime?: number;
-  isCompleted?: boolean;
-  priority: ActivityCardPriority;
-  activityType?: ActivityCardActivityType;
-};
 
 const OVERDUE_LIMIT = 1;
 const TODAY_LIMIT = 3;
@@ -91,42 +71,10 @@ export default function HomeScreen() {
   const activitiesLoading =
     courseActivitiesData === undefined || personalRemindersData === undefined || semesterActivitiesData === undefined;
 
-  const allActivities: HomeActivity[] = useMemo(() => {
-    const fromCourseActivities: HomeActivity[] = (courseActivitiesData ?? []).map((activity) => ({
-      id: activity._id,
-      kind: 'courseActivity',
-      type: 'course',
-      title: activity.title,
-      dueDate: activity.dueDate,
-      displayTime: activity.dueDate,
-      isCompleted: activity.status === 'COMPLETED',
-      priority: activity.priority,
-      activityType: activity.activityType,
-    }));
-
-    const fromPersonalReminders: HomeActivity[] = (personalRemindersData ?? []).map((reminder) => ({
-      id: reminder._id,
-      kind: 'personalReminder',
-      type: 'personal',
-      title: reminder.title,
-      dueDate: reminder.dueDate,
-      displayTime: reminder.startTime,
-      endTime: reminder.endTime,
-      isCompleted: reminder.isCompleted,
-      priority: reminder.priority,
-    }));
-
-    const fromSemesterActivities: HomeActivity[] = (semesterActivitiesData ?? []).map((event) => ({
-      id: event._id,
-      kind: 'semesterActivity',
-      type: 'semester',
-      title: event.title,
-      dueDate: event.date,
-      displayTime: event.date,
-      isCompleted: false,
-      priority: 'CRITICAL',
-    }));
-
+  const allActivities: UnifiedActivity[] = useMemo(() => {
+    const fromCourseActivities = (courseActivitiesData ?? []).map(mapCourseActivity);
+    const fromPersonalReminders = (personalRemindersData ?? []).map(mapPersonalReminder);
+    const fromSemesterActivities = (semesterActivitiesData ?? []).map(mapSemesterActivity);
     return [...fromCourseActivities, ...fromPersonalReminders, ...fromSemesterActivities];
   }, [courseActivitiesData, personalRemindersData, semesterActivitiesData]);
 
@@ -155,7 +103,7 @@ export default function HomeScreen() {
         activity.dueDate <= weekCutoff,
     );
 
-    const byDisplayTime = (a: HomeActivity, b: HomeActivity) => a.displayTime - b.displayTime;
+    const byDisplayTime = (a: UnifiedActivity, b: UnifiedActivity) => a.displayTime - b.displayTime;
     return {
       overdue: overdueItems.sort(byDisplayTime),
       todaySchedule: todayItems.sort(byDisplayTime),
@@ -169,11 +117,12 @@ export default function HomeScreen() {
   const firstName = viewer?.name?.split(' ')[0] ?? 'Student';
   const todayKey = toDateKey(now);
 
-  const goToActivity = (activity: HomeActivity) => {
+  const goToActivity = (activity: UnifiedActivity) => {
     router.push({ pathname: '/activity/[entityId]', params: { entityId: activity.id, type: activity.type } });
   };
   const goToProfile = () => router.push('/settings/profile');
   const goToAddActivity = () => router.push('/add-activity');
+  const goToAcademicYear = () => router.push('/academic-year');
 
   return (
     <Screen
@@ -187,10 +136,12 @@ export default function HomeScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerClassName="flex-grow gap-6 pb-6">
           {semester ? (
-            <ProgressCard
-              title={semester.title}
-              {...computeSemesterProgress(semester.startDate, semester.endDate, now)}
-            />
+            <Pressable onPress={goToAcademicYear} accessibilityRole="button" accessibilityLabel="View academic year progress">
+              <ProgressCard
+                title={semester.title}
+                {...computeSemesterProgress(semester.startDate, semester.endDate, now)}
+              />
+            </Pressable>
           ) : null}
 
           {isEverythingEmpty ? (
@@ -250,10 +201,10 @@ function Section({
   title: string;
   count: number;
   limit: number;
-  items: HomeActivity[];
+  items: UnifiedActivity[];
   emptyText: string | null;
   isOverdue?: boolean;
-  onPressActivity: (activity: HomeActivity) => void;
+  onPressActivity: (activity: UnifiedActivity) => void;
   onViewAll: () => void;
 }) {
   const hasMore = count > limit;
@@ -305,6 +256,8 @@ function ProgressCard({
   percent: number;
   weeksRemaining: number;
 }) {
+  const [accentForeground] = useCSSVariable(['--accent-foreground']) as [string];
+
   return (
     <View className="gap-3 rounded-md bg-accent p-4">
       <View className="flex-row items-center justify-between">
@@ -314,7 +267,13 @@ function ProgressCard({
       <View className="h-2 overflow-hidden rounded-full bg-accent-foreground/20">
         <View className="h-2 rounded-full bg-accent-foreground" style={{ width: `${percent}%` }} />
       </View>
-      <Text className="text-sm text-accent-foreground/80">{weeksRemaining} weeks remaining</Text>
+      <View className="flex-row items-center justify-between">
+        <Text className="text-sm text-accent-foreground/80">{weeksRemaining} weeks remaining</Text>
+        <View className="flex-row items-center gap-1">
+          <Text className="text-xs font-medium text-accent-foreground/80">Academic year progress</Text>
+          <IconSymbol name="chevron.right" size={12} color={accentForeground} />
+        </View>
+      </View>
     </View>
   );
 }

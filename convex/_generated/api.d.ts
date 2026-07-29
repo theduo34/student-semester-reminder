@@ -10,6 +10,7 @@
 
 import type * as ResendOTP from "../ResendOTP.js";
 import type * as academicStructure from "../academicStructure.js";
+import type * as academicYears from "../academicYears.js";
 import type * as activities from "../activities.js";
 import type * as admins from "../admins.js";
 import type * as alerts from "../alerts.js";
@@ -19,6 +20,7 @@ import type * as courseSections from "../courseSections.js";
 import type * as courses from "../courses.js";
 import type * as crons from "../crons.js";
 import type * as http from "../http.js";
+import type * as institutionDomains from "../institutionDomains.js";
 import type * as notificationPreferences from "../notificationPreferences.js";
 import type * as overdueSweep from "../overdueSweep.js";
 import type * as personalReminders from "../personalReminders.js";
@@ -39,6 +41,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   ResendOTP: typeof ResendOTP;
   academicStructure: typeof academicStructure;
+  academicYears: typeof academicYears;
   activities: typeof activities;
   admins: typeof admins;
   alerts: typeof alerts;
@@ -48,6 +51,7 @@ declare const fullApi: ApiFromModules<{
   courses: typeof courses;
   crons: typeof crons;
   http: typeof http;
+  institutionDomains: typeof institutionDomains;
   notificationPreferences: typeof notificationPreferences;
   overdueSweep: typeof overdueSweep;
   personalReminders: typeof personalReminders;

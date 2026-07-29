@@ -54,6 +54,10 @@ import { internalAction, internalMutation, internalQuery, MutationCtx } from './
 const INSTITUTION_NAME = 'Koforidua Technical University';
 const INSTITUTION_EMAIL_DOMAIN = 'ktu.edu.gh';
 
+const ACADEMIC_YEAR_TITLE = '2025/2026';
+const SEMESTER_1_TITLE = '2025/2026 Semester 1';
+const SEMESTER_2_TITLE = '2025/2026 Semester 2';
+
 const DEMO_FACULTY = 'Faculty of Applied Science and Technology';
 const DEMO_DEPARTMENT = 'Computer Science';
 const DEMO_PROGRAM = 'HND Computer Science';
@@ -104,7 +108,7 @@ async function requireActiveSemester(ctx: MutationCtx) {
     .withIndex('by_isActive', (q) => q.eq('isActive', true))
     .unique();
   if (semester === null) {
-    throw new Error('Run seedSemester first');
+    throw new Error('Run seedAcademicYear first');
   }
   return semester;
 }
@@ -268,6 +272,86 @@ async function upsertSemesterActivity(
   });
 }
 
+// Same shape as upsertSemesterActivity above but WITHOUT the push side effect —
+// exclusively for backfilling Semester 1's already-over institutional events (see
+// seedPastSemesterActivities). Scheduling a real push for something that "happened"
+// months ago would be a confusing, misleading notification, not a demo feature.
+async function upsertPastSemesterActivity(
+  ctx: MutationCtx,
+  semesterId: Id<'semesters'>,
+  title: string,
+  description: string,
+  date: number,
+) {
+  const existing = await ctx.db
+    .query('semesterActivities')
+    .withIndex('by_semesterId', (q) => q.eq('semesterId', semesterId))
+    .collect();
+  if (existing.some((row) => row.title === title)) return;
+  await ctx.db.insert('semesterActivities', { semesterId, title, description, date });
+}
+
+async function upsertAcademicYear(ctx: MutationCtx, title: string, startDate: number, endDate: number) {
+  const existing = await ctx.db.query('academicYears').first();
+  if (existing !== null) return existing._id;
+  return ctx.db.insert('academicYears', { title, startDate, endDate });
+}
+
+// The past (isActive: false) semester slot is matched by TITLE — safe here because
+// there's never been a pre-existing inactive semester in this app's history to
+// collide with, so title genuinely is a natural key for this row.
+async function upsertPastSemesterRow(
+  ctx: MutationCtx,
+  title: string,
+  startDate: number,
+  endDate: number,
+  academicYearId: Id<'academicYears'>,
+) {
+  const all = await ctx.db.query('semesters').collect();
+  const existing = all.find((row) => row.title === title);
+  if (existing !== undefined) {
+    if (existing.academicYearId === undefined) {
+      await ctx.db.patch(existing._id, { academicYearId });
+    }
+    return existing._id;
+  }
+  return ctx.db.insert('semesters', { title, startDate, endDate, isActive: false, academicYearId });
+}
+
+// The active semester slot is matched by the `isActive` flag, NOT by title — this
+// project's `semesters.title` string has changed at least once across earlier passes
+// (a real already-running dev deployment had a semester titled "First Semester
+// 2025/2026", not this file's current "2025/2026 Semester 2" constant), so title is
+// NOT a reliable natural key for "the" active semester. There is always at most one
+// (getActive's own `.unique()` on by_isActive depends on that same invariant) — find
+// it, backfill academicYearId onto it, and leave every other field (including its
+// existing title) untouched, rather than risk inserting a second, competing active row.
+async function upsertActiveSemesterRow(
+  ctx: MutationCtx,
+  fallbackTitle: string,
+  fallbackStart: number,
+  fallbackEnd: number,
+  academicYearId: Id<'academicYears'>,
+) {
+  const existingActive = await ctx.db
+    .query('semesters')
+    .withIndex('by_isActive', (q) => q.eq('isActive', true))
+    .unique();
+  if (existingActive !== null) {
+    if (existingActive.academicYearId === undefined) {
+      await ctx.db.patch(existingActive._id, { academicYearId });
+    }
+    return existingActive._id;
+  }
+  return ctx.db.insert('semesters', {
+    title: fallbackTitle,
+    startDate: fallbackStart,
+    endDate: fallbackEnd,
+    isActive: true,
+    academicYearId,
+  });
+}
+
 async function upsertReminderPreferences(
   ctx: MutationCtx,
   studentId: Id<'users'>,
@@ -367,22 +451,21 @@ export const seedHierarchy = internalMutation({
   },
 });
 
-// Lands "today" roughly halfway through the semester (matches the wireframes'
-// "64% · 9 weeks remaining" progress-card framing).
-export const seedSemester = internalMutation({
+// One academic year, two semesters (see AGENTS.md's Academic year section) — Semester 1
+// already wrapped up (past, seedPastSemesterActivities below fills it with mostly-
+// completed activities), Semester 2 is the active one seedCourses/seedActivities/
+// seedDemoStudentData populate. "Today" lands roughly halfway through Semester 2
+// (matches the wireframes' "64% · 9 weeks remaining" progress-card framing) with a
+// short break between the two semesters, not calendar-accurate to a real KTU academic
+// calendar — see this file's top-of-file note on why dates are always relative to
+// Date.now(), never hardcoded.
+export const seedAcademicYear = internalMutation({
   args: {},
   handler: async (ctx) => {
-    const existing = await ctx.db
-      .query('semesters')
-      .withIndex('by_isActive', (q) => q.eq('isActive', true))
-      .unique();
-    if (existing !== null) return existing._id;
-    return ctx.db.insert('semesters', {
-      title: '2025/2026 Semester 2',
-      startDate: atOffset(-56, 0, 0), // 8 weeks before today
-      endDate: atOffset(63, 0, 0), // 9 weeks after today
-      isActive: true,
-    });
+    const yearId = await upsertAcademicYear(ctx, ACADEMIC_YEAR_TITLE, atOffset(-172, 0, 0), atOffset(63, 0, 0));
+    await upsertPastSemesterRow(ctx, SEMESTER_1_TITLE, atOffset(-172, 0, 0), atOffset(-60, 0, 0), yearId);
+    await upsertActiveSemesterRow(ctx, SEMESTER_2_TITLE, atOffset(-56, 0, 0), atOffset(63, 0, 0), yearId);
+    return yearId;
   },
 });
 
@@ -565,8 +648,8 @@ export const seedDemoStudent = internalAction({
 
 // studentProfile + reminderPreferences + personalReminders for the demo student — all
 // grouped here (rather than under seedActivities) since they're the demo student's own
-// data, not admin-published catalogue data. Requires seedHierarchy, seedSemester, and
-// seedCourses to have already run.
+// data, not admin-published catalogue data. Requires seedHierarchy, seedAcademicYear,
+// and seedCourses to have already run.
 export const seedDemoStudentData = internalMutation({
   args: { userId: v.id('users') },
   handler: async (ctx, { userId }) => {
@@ -778,6 +861,86 @@ export const seedActivities = internalMutation({
   },
 });
 
+const SEMESTER_1_COURSES = [
+  { code: 'CS 201', title: 'Data Structures & Algorithms', colour: '#4F46E5' },
+  { code: 'CS 205', title: 'Computer Architecture', colour: '#059669' },
+];
+
+// Backfills Semester 1 (already over — see seedAcademicYear) with its own courses and a
+// mostly-completed activity history, so the Academic Year Progress screen has a real
+// second semester to show, not an empty one. One course activity and the one personal
+// reminder are deliberately left incomplete even though the semester has ended — a
+// realistic "never got around to checking it off" case, not a bug — so the year's
+// overall completion reads as high but not a suspicious, unrealistic 100%. Requires
+// seedAcademicYear, seedHierarchy, and seedDemoStudent to have already run.
+export const seedPastSemesterActivities = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const allSemesters = await ctx.db.query('semesters').collect();
+    const semester1 = allSemesters.find((row) => row.title === SEMESTER_1_TITLE);
+    if (semester1 === undefined) {
+      throw new Error('Run seedAcademicYear first');
+    }
+    const demoUser = await ctx.db
+      .query('users')
+      .withIndex('email', (q) => q.eq('email', DEMO_STUDENT.authEmail))
+      .unique();
+    if (demoUser === null) {
+      throw new Error('Run seedDemoStudent first');
+    }
+    const { academicClass } = await resolveClass(ctx, DEMO_FACULTY, DEMO_DEPARTMENT, DEMO_PROGRAM, DEMO_LEVEL, DEMO_SESSION);
+
+    const courseIds: Record<string, Id<'courses'>> = {};
+    for (const course of SEMESTER_1_COURSES) {
+      courseIds[course.code] = await upsertCourse(ctx, semester1._id, academicClass._id, course.code, course.title, course.colour);
+    }
+
+    const pastActivities: CourseActivitySeed[] = [
+      { courseId: courseIds['CS 201'], title: 'Assignment 1', activityType: 'ASSIGNMENT', dueDate: atOffset(-150, 23, 59), priority: 'IMPORTANT', status: 'COMPLETED' },
+      { courseId: courseIds['CS 201'], title: 'Quiz 1', activityType: 'QUIZ', dueDate: atOffset(-130, 16, 0), priority: 'IMPORTANT', status: 'COMPLETED' },
+      { courseId: courseIds['CS 201'], title: 'Final Exam', activityType: 'EXAM', dueDate: atOffset(-65, 9, 0), priority: 'CRITICAL', status: 'COMPLETED' },
+      { courseId: courseIds['CS 205'], title: 'Lab Report 1', activityType: 'ASSIGNMENT', dueDate: atOffset(-140, 23, 59), priority: 'FLEXIBLE', status: 'COMPLETED' },
+      { courseId: courseIds['CS 205'], title: 'Midterm Test', activityType: 'QUIZ', dueDate: atOffset(-110, 10, 0), priority: 'IMPORTANT', status: 'COMPLETED' },
+      // Left PENDING on purpose — see this function's own comment above.
+      { courseId: courseIds['CS 205'], title: 'Final Project', activityType: 'PROJECT', dueDate: atOffset(-62, 23, 59), priority: 'IMPORTANT', status: 'PENDING' },
+    ];
+
+    const existing = await ctx.db
+      .query('courseActivities')
+      .withIndex('by_studentId', (q) => q.eq('studentId', demoUser._id))
+      .collect();
+    const existingKeys = new Set(existing.map((row) => `${row.courseId}:${row.title}`));
+    for (const activity of pastActivities) {
+      if (existingKeys.has(`${activity.courseId}:${activity.title}`)) continue;
+      await ctx.db.insert('courseActivities', { studentId: demoUser._id, ...activity });
+    }
+
+    await upsertPastSemesterActivity(
+      ctx,
+      semester1._id,
+      'Semester 1 Registration',
+      'Course registration period for the first semester.',
+      atOffset(-170, 9, 0),
+    );
+    await upsertPastSemesterActivity(
+      ctx,
+      semester1._id,
+      'Semester 1 exams begin',
+      'End-of-semester examination period.',
+      atOffset(-70, 8, 0),
+    );
+
+    await upsertPersonalReminder(ctx, {
+      userId: demoUser._id,
+      semesterId: semester1._id,
+      title: 'Submit course evaluation',
+      dueDate: atOffset(-63, 12, 0),
+      startTime: atOffset(-63, 12, 0),
+      priority: 'FLEXIBLE',
+    });
+  },
+});
+
 // Realistic mix of read/unread across all four Alerts time buckets (Today/Yesterday/
 // This week/Earlier) and all three kinds (REMINDER_FIRED/NEW_EVENT/OVERDUE), so the
 // Alerts tab isn't empty during a defense demo. Placed relative to the START of each
@@ -951,11 +1114,12 @@ export const seedAll = internalAction({
 
     await ctx.runMutation(internal.seed.seedInstitution, {});
     await ctx.runMutation(internal.seed.seedHierarchy, {});
-    await ctx.runMutation(internal.seed.seedSemester, {});
+    await ctx.runMutation(internal.seed.seedAcademicYear, {});
     await ctx.runMutation(internal.seed.seedCourses, {});
     await ctx.runAction(internal.seed.seedDemoStudent, {});
     await ctx.runAction(internal.seed.seedDemoAdmin, {});
     await ctx.runMutation(internal.seed.seedActivities, {});
+    await ctx.runMutation(internal.seed.seedPastSemesterActivities, {});
     await ctx.runMutation(internal.seed.seedDemoAlerts, {});
 
     console.warn(`[seed] Done. Demo student: ${DEMO_STUDENT.authEmail} / ${DEMO_STUDENT.password}`);

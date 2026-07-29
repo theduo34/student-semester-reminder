@@ -29,6 +29,15 @@ export default function ProtectedLayout() {
         name="settings/profile/index"
         options={{ headerShown: true, headerBackButtonDisplayMode: 'minimal', title: 'Profile' }}
       />
+      {/* Pushed from Home's Academic Year Progress card — title is set dynamically
+          from the resolved academic year's own title via a local <Stack.Screen> inside
+          the route component itself (see app/(protected)/academic-year/index.tsx),
+          same pattern activity/[entityId]'s headerRight already uses for data the
+          static config here doesn't have. */}
+      <Stack.Screen
+        name="academic-year/index"
+        options={{ headerShown: true, headerBackButtonDisplayMode: 'minimal' }}
+      />
     </Stack>
   );
 }

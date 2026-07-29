@@ -300,6 +300,60 @@ queries — Screen's `header` slot isn't gated behind `isLoading`, so the header
 now-tappable `Avatar`, pushing `/settings/profile`) appears immediately while the body
 below still shows `HomeSkeleton`.
 
+`ProgressCard` itself (the semester time-elapsed bar) is now wrapped in a `Pressable`
+pushing `/academic-year` — see "Academic Year Progress" below. A small "Academic year
+progress →" caption + chevron was added inside the card itself (using
+`useCSSVariable(['--accent-foreground'])` for the chevron's colour, same pattern as
+every other place this app pipes a semantic token into a native icon's `color` prop)
+so the card visibly reads as pressable rather than looking identical to before while
+silently gaining a tap target.
+
+### Academic Year Progress (`app/(protected)/academic-year/index.tsx`)
+
+Pushed from Home's `ProgressCard` (see above) — registered as a sibling of `(tabs)` in
+`app/(protected)/_layout.tsx`, same standing rule every other pushed detail screen
+follows (see "Nested navigation" below), native header with a dynamically-set title
+(`Stack.Screen options={{ title: overview?.year.title }}` set locally in the route
+component, same pattern `activity/[entityId]`'s `headerRight` already uses for
+data the static per-route config in `_layout.tsx` doesn't have).
+
+**Data**: one query, `api.academicYears.getCurrentYearOverview` — see the Backend
+section below. Returns the resolved `academicYears` row plus both its semesters, each
+with its own `semesterActivities`/`personalReminders`/`courseActivities` already
+scoped to the caller. The screen maps each semester's rows through the same
+`lib/activityMapping.ts` mappers Home uses (see `lib/` below), sorts them by
+`dueDate`, and renders them via the same `ActivityCard` row every other activity list
+in this app uses — no screen-specific row treatment.
+
+**Layout**, top to bottom:
+- An overall `CircularProgress` ring (`components/shared/CircularProgress.tsx`) showing
+  total completed ÷ total completable across BOTH semesters, plus a one-line summary
+  ("N of M activities completed across the 2025/2026 academic year").
+- One card per semester: title (+ a small "Current" pill for the active one — the same
+  `bg-accent/15` + `text-accent` pairing used elsewhere for a soft, non-alarming tag),
+  its date range, a time-elapsed bar identical in style to Home's `ProgressCard` (via
+  the shared `lib/semesterProgress.ts#computeSemesterProgress` — see `lib/` below), and
+  a completed/total count. The active semester shows "N weeks remaining"; the past one
+  shows "N% of term elapsed" instead (a fully-elapsed past semester reads as 100%, not
+  a negative or nonsensical value — `computeSemesterProgress` already clamps to
+  [0, 100]).
+- That semester's full activity list below its card, tapping through to Activity
+  Details exactly like Home/Calendar's own rows do.
+
+**Completion counting**: only `courseActivities` and `personalReminders` count toward
+a semester's completed/total (and the overall ring) — a `semesterActivity` has no
+completion concept (institutional events can't be "done," see AGENTS.md's Priority
+model), so it's excluded from both counts but still rendered in the activity list.
+This is the same exemption Home's own overdue detection already makes for semester
+activities, applied here to completion instead of overdue.
+
+**Empty/missing states**: a full-screen skeleton while the query is loading (shape-
+matched to the ring + two semester cards, same `HomeSkeleton` pattern as Home); a
+plain centered message ("No active semester right now — check back once one is
+published") when the query resolves to `null` — this can happen with no active
+semester at all, or an active semester that predates the `academicYearId` schema
+field (see Backend section below) — rather than a broken/blank screen either way.
+
 ### Calendar (`app/(protected)/(tabs)/calendar/index.tsx`)
 
 Accepts optional `date` (`YYYY-MM-DD`, the app-wide `toDateKey` format) and `view`
@@ -690,6 +744,18 @@ than a parallel `adminProfiles` table. See AGENTS.md's Admin account section for
   by a path other than `convex/admins.ts`. `reset` is deliberately left unconfigured —
   forgot-password stays interface-only for students (see the auth pass); admins have a
   completely different, non-self-service reset path, see `admins.ts` below.
+  `profile()` ALSO rejects a signup whose email doesn't match a known institution
+  domain (`convex/institutionDomains.ts`'s static `KNOWN_INSTITUTION_DOMAINS` array,
+  thrown as a `ConvexError` so the message survives production's plain-`Error`
+  redaction — see `lib/authErrors.ts`) — gated to `params.flow === 'signUp'`
+  specifically, since this callback actually runs on every auth flow (signIn
+  included) but Convex Auth's Password provider only ever *uses* its return value on
+  the signUp branch. `convexAuth()`'s top-level `callbacks.afterUserCreatedOrUpdated`
+  (same file) does the actual `institutionId` resolution against the real
+  `institutions` table — split out from `profile()` because that callback runs
+  synchronously with no database access, while this one gets a real mutation ctx and
+  only ever fires for a brand-new credentials signup (never signIn). See AGENTS.md's
+  "Signup email-domain matching" section for the full flow.
 - `users.ts` — `viewer` query (current user or null, including `role`/`institutionId`
   since it returns the full row), the auth-gate's first check; `updateName` — the one
   field the profile detail screen edits on the auth `users` table rather than
@@ -714,9 +780,24 @@ than a parallel `adminProfiles` table. See AGENTS.md's Admin account section for
   Division), see AGENTS.md, plus `getFullHierarchy` — resolves an entire profile's
   faculty/department/academicClass/division ids to human-readable names in one call
   (profile detail screen's ACADEMIC group, the cascading edit picker's pre-fill).
+- `academicYears.ts` — `getCurrentYearOverview`, the Academic Year Progress screen's one
+  query. `ctx.auth`-derived, never a client-passed studentId. Resolves the AcademicYear
+  containing the currently-active semester, then gathers both semesters'
+  semesterActivities/personalReminders/courseActivities for the caller — courseActivities
+  has no `semesterId` of its own (it only inherits one through its course, see
+  schema.ts), so this scopes them per semester via each semester's own `courses` rows
+  rather than a direct index lookup. Returns `null` when there's no active semester, or
+  when the active semester predates the `academicYearId` field (see schema.ts) — the
+  screen renders a plain "check back later" message in either case rather than crashing.
+  See "Academic Year Progress" below for the screen this powers.
 - `studentProfiles.ts` — `getMyProfile` / `createProfile`, the onboarding-gate table.
-  Also `updatePhoneNumber` / `updateInstitutionalEmail` / `updateDivision` (single-field
-  edits, ownership-checked via a shared `requireMyProfile` helper) and
+  `createProfile`/`updateInstitutionalEmail`'s shared `requireInstitutionalEmailDomain`
+  helper resolves against the CALLER'S OWN `institutionId` (set at signup, see
+  `auth.ts` above) now, not just "whichever institution happens to be first in the
+  table" — falls back to `.first()` only for a legacy row that predates `institutionId`
+  being set on students. Also `updatePhoneNumber` / `updateInstitutionalEmail` /
+  `updateDivision` (single-field edits, ownership-checked via a shared
+  `requireMyProfile` helper) and
   `updateAcademicHierarchy` (the cascading edit — re-validates the whole Faculty→
   Division chain server-side rather than trusting the client sent a self-consistent set
   of ids, unlike `createProfile`, since moving a student to a different academicClass is
@@ -779,10 +860,11 @@ than a parallel `adminProfiles` table. See AGENTS.md's Admin account section for
   for the three alert kinds and the `title`/`subtitle`/`priority`-frozen-at-creation
   schema note.
 - `seed.ts` — dev-only seed data: institution, KTU faculty/department/program/class
-  hierarchy, courses with per-division `courseSections`, course/semester activities,
-  and a ready-to-log-in demo student (`demo@example.com` / `demo1234` — see README).
-  Source of demo data for this project; no manual data entry via the UI during dev.
-  Run via `npx convex run seed:seedAll '{"iAmSure": true}'` — the confirmation arg is
+  hierarchy, one AcademicYear spanning two Semesters, courses with per-division
+  `courseSections`, course/semester activities, and a ready-to-log-in demo student
+  (`demo@example.com` / `demo1234` — see README). Source of demo data for this
+  project; no manual data entry via the UI during dev. Run via
+  `npx convex run seed:seedAll '{"iAmSure": true}'` — the confirmation arg is
   required since Convex has no reliable built-in dev-vs-prod flag for backend code to
   check. Every function is idempotent (natural-key lookup — name/code/combined — before
   insert, never delete-then-recreate); this is the standing pattern for any future
@@ -797,6 +879,20 @@ than a parallel `adminProfiles` table. See AGENTS.md's Admin account section for
   were verified against ktu.edu.gh directly vs. best-guessed (the index-number format
   is explicitly flagged as unconfirmed); the admin app owns this data for real once it
   exists.
+  `seedAcademicYear` upserts the `academicYears` row and both semesters —
+  the active semester slot is matched by the `isActive` flag, NOT by title, since this
+  project's semester title string has changed at least once across earlier passes (a
+  real already-running dev deployment had a semester titled differently than the
+  current `SEMESTER_2_TITLE` constant) — title is not a reliable natural key for "the"
+  active semester, only for the brand-new past one. `seedPastSemesterActivities` then
+  backfills the past semester with its own courses and a mostly-completed activity
+  history (one course activity and one personal reminder deliberately left incomplete
+  even though the semester is over — a realistic "never checked it off" case, so the
+  Academic Year Progress screen's completion ring reads as high but not a suspicious,
+  unrealistic 100%) via `upsertPastSemesterActivity`, a push-free sibling of
+  `upsertSemesterActivity` — scheduling a real push for an institutional event that
+  "happened" months ago would be a confusing, misleading notification, not a demo
+  feature.
 
 ### `lib/`
 
@@ -815,6 +911,16 @@ than a parallel `adminProfiles` table. See AGENTS.md's Admin account section for
 - `initials.ts` — `getInitials`, the one avatar-initials algorithm (first name's first
   letter + last name's first letter, uppercase, max 2 characters) — every avatar in the
   app calls this rather than inlining its own `.charAt(0)`. See AGENTS.md.
+- `activityMapping.ts` — `UnifiedActivity` (the shared shape both Home and the Academic
+  Year Progress screen map their three source queries into) plus its three mapper
+  functions (`mapCourseActivity`/`mapPersonalReminder`/`mapSemesterActivity`) —
+  extracted from Home's own original inline mapping once the Academic Year Progress
+  screen needed the exact same thing, per AGENTS.md's "never copy component code
+  between two screens" rule (applies to mapping logic, not just components).
+- `semesterProgress.ts` — `computeSemesterProgress(startDate, endDate, now)`, the
+  time-elapsed percent + weeks-remaining calculation both Home's `ProgressCard` and the
+  Academic Year Progress screen's per-semester sub-cards use — same extraction
+  reasoning as `activityMapping.ts` above.
 - `reminderIntervals.ts` — `INTERVAL_OPTIONS` (now includes a `0`-minute "At deadline"
   entry) plus `INTERVAL_GROUPS`, which buckets them into the reminder-timing screen's
   three sections (Days before / Hours before / At deadline).
@@ -967,6 +1073,12 @@ AGENTS.md's Design posture for the rule that populates it. Current pieces:
   `variant: 'danger'`). First used on Activity Details' header menu (Edit/Delete for a
   personal reminder, hidden entirely for admin-owned course/semester activities); the
   same shape is expected on activity list rows and personal reminder cards later.
+- `CircularProgress.tsx` — the one completion ring (Academic Year Progress's overall
+  percent), built directly on `react-native-svg` (already a project dependency) rather
+  than a third-party progress library — every ready-made one takes raw colour props,
+  not this app's semantic CSS-variable tokens, so there'd be no less code either way
+  (see AGENTS.md's Library-first rule for when this reasoning does vs. doesn't apply).
+  Fully round — exempt from the `rounded-md` card convention, same as an avatar/pill/FAB.
 
 `components/features/auth/` (`AuthHeader` — full lockup, icon + wordmark + tagline,
 sized generously as the app's identity mark) and `components/features/onboarding/` are

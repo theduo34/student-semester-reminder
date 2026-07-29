@@ -45,15 +45,28 @@ export default defineSchema({
   users: defineTable({
     ...authTables.users.validator.fields,
     role: userRoleValidator,
-    // Populated for admins only — their institution association lives directly here
-    // instead of a separate profile row, since admins have no studentProfiles-
-    // equivalent table. Optional purely because students never have one;
-    // createAdminAccount always sets it for the admin it creates, never leaves it
-    // unset for one.
+    // Set for every user, both roles, now — not admin-only. Admins get it explicitly
+    // from convex/admins.ts#createAdminAccount; students get it resolved from their
+    // signup email's domain (convex/institutionDomains.ts's static allowlist +
+    // convex/auth.ts's afterUserCreatedOrUpdated callback, since the domain check
+    // itself runs in a synchronous, DB-less context and can only validate the domain,
+    // not look up the real institutions._id). Still optional because Convex can't
+    // backfill a newly-added field onto rows that predate it (a demo/dev account
+    // created before this field existed) — anywhere this is read, treat "unset" as
+    // "assume the sole/original institution," never crash on it.
     institutionId: v.optional(v.id('institutions')),
   })
     .index('email', ['email'])
     .index('phone', ['phone']),
+
+  // Groups exactly two semesters into one academic year (see AGENTS.md) — the grouping
+  // unit behind Home's Academic Year Progress card/detail screen. Admin-published,
+  // read-only queries only, same status as semesters/courses below.
+  academicYears: defineTable({
+    title: v.string(),
+    startDate: v.number(),
+    endDate: v.number(),
+  }),
 
   // Admin-published (the (admin) route group's Publish tab, once built — see
   // AGENTS.md's Admin account section). Read-only queries only, as of this pass.
@@ -62,7 +75,15 @@ export default defineSchema({
     startDate: v.number(),
     endDate: v.number(),
     isActive: v.boolean(),
-  }).index('by_isActive', ['isActive']),
+    // Which academicYears row this semester belongs to. Optional because it was added
+    // after semesters already existed in this schema — a semester without one predates
+    // the concept and simply can't be grouped into an Academic Year Progress view (see
+    // convex/academicYears.ts), it's still fully usable everywhere else (getActive,
+    // course/activity scoping, ...).
+    academicYearId: v.optional(v.id('academicYears')),
+  })
+    .index('by_isActive', ['isActive'])
+    .index('by_academicYearId', ['academicYearId']),
 
   // --- Institutional hierarchy. Admin-published, read-only from this app. ---
   // Institution -> Faculty -> Department -> Program -> academicClass (Level+Session)

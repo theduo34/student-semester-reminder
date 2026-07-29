@@ -26,8 +26,9 @@ every time. See CLAUDE.md for the full write-up.
 ## Demo / seed data
 
 `convex/seed.ts` is the source of demo data for this project — institution, KTU
-hierarchy, courses, activities, and a ready-to-log-in demo student
-(`demo@example.com` / `demo1234`). Run via
+hierarchy, one AcademicYear spanning two Semesters (one already-over, one active — see
+"Academic Year Progress" below), courses, activities, and a ready-to-log-in demo
+student (`demo@example.com` / `demo1234`). Run via
 `npx convex run seed:seedAll '{"iAmSure": true}'`; see CLAUDE.md's Backend section for
 the full breakdown and README for the quick-start version. No manual data entry via the
 UI during dev — add to the seed instead. Every seed function is idempotent
@@ -61,16 +62,21 @@ build it here," not "a different app owns this."
 
 Every user has a `role` (`"student" | "admin"`) on the auth-managed `users` table,
 extended (not replaced) per `@convex-dev/auth`'s own documented pattern — see
-`convex/schema.ts`. Admins additionally carry `institutionId` directly on their `users`
-row (optional in the schema only because students never have one; every admin account
-gets one, always). No separate `adminProfiles` table: this is a single-institution
-MVP (see "Institution" below), so one extra column costs nothing extra to join, and the
-routing guard already reads this same `users` row for every other gate decision — a
-second table would just be a second place to keep in sync.
+`convex/schema.ts`. Every user also carries `institutionId` directly on their `users`
+row now — admins get it explicitly at creation (below), students get it resolved from
+their signup email's domain (see "Signup email-domain matching" below). Still optional
+in the schema only because Convex can't backfill a field onto rows that predate it (a
+demo/dev account created before this existed). No separate `adminProfiles` table: this
+is a still a small-institution-count MVP (see "Institution" below), so one extra column
+costs nothing extra to join, and the routing guard already reads this same `users` row
+for every other gate decision — a second table would just be a second place to keep
+in sync.
 
 **Students** get `role: "student"` automatically, set by the public register flow's own
 `profile()` callback (`convex/auth.ts`) — this is the only account-creation path that
-exists for students, unchanged from before.
+exists for students, unchanged from before. That same callback is also where their
+signup email's domain gets validated against a known institution — see "Signup
+email-domain matching" below.
 
 **Admins** are created exclusively by `convex/admins.ts`'s `createAdminAccount`, an
 internal function (dashboard/CLI-only, never client-callable) — see README.md's "Admin
@@ -127,10 +133,48 @@ Division (optional). A student belongs to exactly one Faculty/Department/Program
 Session combination, and optionally one Division within it. Entirely Admin-published,
 read-only here (`convex/academicStructure.ts`).
 
-- **Institution** — single row for now (Koforidua Technical University,
-  `emailDomain: "ktu.edu.gh"`). Name and email domain are always read from this row, not
-  hardcoded — `studentProfiles.createProfile` validates the student's institutional
-  email against it, so a wrong/changed domain is a one-row edit, not a code change.
+- **Institution** — one row today (Koforidua Technical University,
+  `emailDomain: "ktu.edu.gh"`), but the schema and every query already support more than
+  one — see "Signup email-domain matching" below for how a student's institution gets
+  resolved without ever being asked to pick one. Name and email domain are always read
+  from the `institutions` table, not hardcoded — `studentProfiles.createProfile`
+  validates the student's institutional email against their OWN resolved institution
+  (not just "whichever institution happens to be first in the table" — see
+  `convex/studentProfiles.ts#requireInstitutionalEmailDomain`), so onboarding a second
+  institution is a data change (a new `institutions` row + a domain added to the
+  allowlist below), not a code change to this validation itself.
+
+#### Signup email-domain matching
+
+A student's institution is determined once, automatically, from their signup email's
+domain — there's no "pick your institution" step anywhere in the app. `convex/
+institutionDomains.ts` holds a small static array, `KNOWN_INSTITUTION_DOMAINS`
+(currently just `ktu.edu.gh`), checked in `convex/auth.ts`'s Password `profile()`
+callback: a signup (`flow === 'signUp'` only — see below) whose email doesn't end in
+one of these domains is rejected with a friendly error before an account is even
+created. This array is static rather than a live query against the `institutions`
+table for a real technical reason, not a style choice: Convex Auth's `profile()`
+callback must run synchronously with no database access (see that file's own comment),
+so it can only validate the domain shape, not look up a real `institutions._id`.
+Resolving the actual id happens one step later, in `convexAuth()`'s
+`afterUserCreatedOrUpdated` callback (`convex/auth.ts`) — a real mutation context, run
+right after the account is created — which re-matches the same domain against the
+`institutions` table and patches the new user's `institutionId`. Adding a second
+institution means updating BOTH: a new domain string in
+`KNOWN_INSTITUTION_DOMAINS` AND a matching `institutions` row (via `convex/seed.ts` or
+the admin app once it exists) — the two are kept in sync manually, by design, not
+derived from each other.
+
+**Login never re-checks the domain.** `profile()` runs on every auth flow (signUp,
+signIn, password reset, ...), not just signUp — but Convex Auth's Password provider only
+ever *uses* the callback's return value on the signUp branch (passed to
+`createAccount`); the signIn branch (`retrieveAccount`) only reads `.email` off it and
+discards the rest. The domain check is explicitly gated to `flow === 'signUp'` for
+exactly this reason — a returning student's email was already validated at signup and
+must never be silently broken by a later-added institution, or re-validated on every
+login. `institutionId` on `users` (see schema.ts) is therefore set for every account
+now, both roles — students via this signup flow, admins explicitly via
+`convex/admins.ts#createAdminAccount` — not admin-only as it originally was.
 - **Faculty → Department → Program** — a straight one-parent-each tree.
 - **academicClass** — a resolved Program + Level + Session triple (e.g. "HND Computer
   Science, Level 200, Regular"). Called `academicClass` everywhere — schema, types,
@@ -142,6 +186,12 @@ read-only here (`convex/academicStructure.ts`).
 
 ### Academic entities
 
+- **AcademicYear** — groups exactly two Semesters (`convex/schema.ts`'s `academicYears`
+  table; `semesters.academicYearId` is the link, optional only because it was added
+  after semesters already existed — see that field's own schema comment). Admin-
+  published, read-only here, same status as Semester/Course below. Backs Home's
+  Academic Year Progress card and its own detail screen — see "Academic Year Progress"
+  below.
 - **Semester** — the anchor for everything, only one active at a time. Admin-published,
   read-only here.
 - **Course** — Admin-published catalogue entry (courseCode, courseTitle, colourTag,
@@ -357,8 +407,8 @@ the open questions below).
 
 ## Display integration — unified activity list
 
-Home and Calendar (and eventually Alerts, once it exists — see CLAUDE.md) render
-course activities, personal reminders, and semester activities via the one shared row,
+Home, Calendar, and the Academic Year Progress screen (see below) all render course
+activities, personal reminders, and semester activities via the one shared row,
 `components/shared/ActivityCard.tsx` — never two separate sections, never a
 screen-specific copy of the same row. Rebuilt for Wireframe_02 during the Home pass:
 priority is the row's organizing colour now, not course `colourTag` — a left icon well
@@ -385,6 +435,20 @@ present (deduplicated, not one dot per activity), and every personal reminder bu
 as "Personal" there regardless of its own priority field. See CLAUDE.md's Calendar
 section for why the grid's bucket and a row's own priority colour aren't the same rule
 and shouldn't be unified.
+
+## Academic Year Progress
+
+Home's semester `ProgressCard` (a time-elapsed bar + weeks-remaining, unchanged) is
+pressable and pushes `/academic-year` — a full breakdown of the student's current
+AcademicYear (see "Academic entities" above): an overall completion ring, both
+Semesters as their own sub-cards (time-elapsed bar + completed/total count), and every
+activity across both, rendered via the same `ActivityCard` row every other screen
+uses. "Completion" only ever counts courseActivities + personalReminders — a
+semesterActivity has no completion concept (same exemption Home's own overdue
+detection already makes, see CLAUDE.md), so it's excluded from the ring/counts but
+still shown in the activity list. See CLAUDE.md's Academic Year Progress section for
+the screen's full architecture (query shape, shared mapping helpers, the
+`CircularProgress` component).
 
 ## UX conventions
 

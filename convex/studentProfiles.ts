@@ -31,9 +31,18 @@ async function requireMyProfile(ctx: MutationCtx, userId: Id<'users'>) {
   return profile;
 }
 
-async function requireInstitutionalEmailDomain(ctx: MutationCtx, institutionalEmail: string) {
-  const institution = await ctx.db.query('institutions').first();
-  if (institution === null) {
+// Resolves against the CALLER's OWN institution (set at signup from their account
+// email's domain — see convex/auth.ts), not just "whichever institution happens to be
+// first in the table" — that was fine with exactly one institution seeded, but silently
+// wrong the moment a second one exists. Falls back to `.first()` only for a legacy row
+// created before institutionId was set on students (see schema.ts's comment on that
+// field) — never for a normal post-this-change account.
+async function requireInstitutionalEmailDomain(ctx: MutationCtx, userId: Id<'users'>, institutionalEmail: string) {
+  const user = await ctx.db.get(userId);
+  const institution = user?.institutionId
+    ? await ctx.db.get(user.institutionId)
+    : await ctx.db.query('institutions').first();
+  if (institution === null || institution === undefined) {
     throw new Error('No institution configured');
   }
   const expectedSuffix = `@${institution.emailDomain}`.toLowerCase();
@@ -67,7 +76,7 @@ export const createProfile = mutation({
       throw new Error('Profile already exists');
     }
 
-    await requireInstitutionalEmailDomain(ctx, args.institutionalEmail);
+    await requireInstitutionalEmailDomain(ctx, userId, args.institutionalEmail);
 
     return await ctx.db.insert('studentProfiles', { userId, ...args });
   },
@@ -102,7 +111,7 @@ export const updateInstitutionalEmail = mutation({
       throw new Error('Not authenticated');
     }
     const profile = await requireMyProfile(ctx, userId);
-    await requireInstitutionalEmailDomain(ctx, institutionalEmail);
+    await requireInstitutionalEmailDomain(ctx, userId, institutionalEmail);
     await ctx.db.patch(profile._id, { institutionalEmail });
   },
 });

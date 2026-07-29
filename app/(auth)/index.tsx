@@ -22,9 +22,6 @@ export default function AuthScreen() {
 
   return (
     <KeyboardAwareScreen contentContainerClassName="pb-6">
-      <Text style={{ color: 'red', fontWeight: 'bold', textAlign: 'center' }}>
-        DEBUG MARKER 12345 - if you see this, Metro is connected
-      </Text>
       <AuthHeader />
 
       <Tabs value={tab} onValueChange={(value) => setTab(value as AuthTab)}>
@@ -191,12 +188,12 @@ function RegisterForm({ onLoginLinkPress }: { onLoginLinkPress: () => void }) {
         />
       </Animated.View>
 
-      <Animated.View entering={stagger(1)}>
+      <Animated.View entering={stagger(1)} className="gap-1">
         <TextField
           label="Email"
           value={email}
           onChangeText={setEmail}
-          placeholder="you@example.com"
+          placeholder="name@ktu.edu.gh"
           icon="envelope"
           isRequired
           keyboardType="email-address"
@@ -204,6 +201,11 @@ function RegisterForm({ onLoginLinkPress }: { onLoginLinkPress: () => void }) {
           autoComplete="email"
           textContentType="emailAddress"
         />
+        {/* Client-side hint only — the actual enforcement is server-side, in
+            convex/auth.ts's profile() callback (see convex/institutionDomains.ts). A
+            wrong-domain email is rejected on submit either way; this just avoids
+            surprising the student with an unexplained server error first. */}
+        <Text className="ml-1 text-xs text-muted">Use your institutional email address.</Text>
       </Animated.View>
 
       <Animated.View entering={stagger(2)}>
