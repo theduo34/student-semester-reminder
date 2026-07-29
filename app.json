@@ -10,7 +10,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.termio.app"
+      "bundleIdentifier": "com.termio.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.termio.app",
@@ -23,7 +26,9 @@
       },
       "permissions": [
         "READ_CALENDAR",
-        "WRITE_CALENDAR"
+        "WRITE_CALENDAR",
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR"
       ],
       "softwareKeyboardLayoutMode": "resize",
       "edgeToEdgeEnabled": true,

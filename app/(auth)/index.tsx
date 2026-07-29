@@ -22,6 +22,9 @@ export default function AuthScreen() {
 
   return (
     <KeyboardAwareScreen contentContainerClassName="pb-6">
+      <Text style={{ color: 'red', fontWeight: 'bold', textAlign: 'center' }}>
+        DEBUG MARKER 12345 - if you see this, Metro is connected
+      </Text>
       <AuthHeader />
 
       <Tabs value={tab} onValueChange={(value) => setTab(value as AuthTab)}>
@@ -76,6 +79,7 @@ function LoginForm({ onRegisterLinkPress }: { onRegisterLinkPress: () => void })
       }
       // else: signed in — the root layout's auth gate takes it from here.
     } catch (error) {
+      console.error('[auth] sign-in failed:', error);
       showError(getAuthErrorMessage(error));
     } finally {
       setIsSubmitting(false);
@@ -165,6 +169,7 @@ function RegisterForm({ onLoginLinkPress }: { onLoginLinkPress: () => void }) {
       await signIn('password', { name: fullName, email, password, flow: 'signUp' });
       router.push({ pathname: '/verify-email', params: { email } });
     } catch (error) {
+      console.error('[auth] sign-up failed:', error);
       showError(getAuthErrorMessage(error));
     } finally {
       setIsSubmitting(false);
