@@ -42,21 +42,33 @@ codes/titles/activity content are invented example data by design, nothing to ve
 
 ## Scope boundary — read before building anything
 
-**Superseded plan, corrected here rather than left contradicting the code**: earlier
+**Plan history, corrected here rather than left contradicting the code**: earlier
 passes described a separate Next.js Academic Admin web app as the owner of semester-
-publishing and course-catalogue management, with this repo staying student-only. That
-plan changed with the Admin foundation pass: admin is now a role-gated experience
-*inside this same Expo app* (the `(admin)` route group, see "Admin account" below),
-not a second app in a second repo. One codebase, one Convex backend, two experiences
-gated by `users.role` at the routing layer (`hooks/use-auth-gate.ts`) — not a
-student/admin split enforced by which repo you're looking at.
+publishing and course-catalogue management. That plan was superseded by the Admin
+foundation pass, which folded admin into this same Expo app instead (the `(admin)`
+route group, see "Admin account" below) — one codebase, one Convex backend, two
+experiences gated by `users.role` at the routing layer.
+
+**That has been superseded again.** The admin dashboard is now being built as its own
+web app, in its own separate repo — the in-app `(admin)` route group approach didn't
+stick. This is still one Convex backend, one set of deployments — the web app is a
+second *client* against the same project, not a second backend and not a second
+deployment. See `CONVEX_BACKEND.md` at this repo's root for the schema/function
+inventory and known gaps written specifically for that repo's agent to work from.
+
+Practical effect on this repo: the `(admin)` route group (`app/(admin)/`) still
+exists with its placeholder tab screens (see "Admin account" and CLAUDE.md's Routing
+section) and isn't being ripped out, but it's no longer where admin CRUD gets built
+out — don't extend Hierarchy/Courses/Publish here under the old plan. Real admin
+write mutations (institutional hierarchy, courses, courseSections, semesters,
+academicYears, semesterActivities) get designed and added from the admin web app repo
+against this same backend, following the `role === 'admin'`-checked, ctx.auth-derived
+pattern this repo already uses for student-owned tables (see Security above).
 
 `convex/semesters.ts`, `convex/courses.ts`, `convex/alerts.ts`, and
-`convex/academicStructure.ts` being read-only *queries* is still accurate — semester-
-publishing, course-catalogue management, and institutional-hierarchy management are
-genuinely not built yet (the `(admin)` tab screens are placeholders as of this pass,
-see "Admin account" below) — but "not built yet" now means "the next `(admin)` passes
-build it here," not "a different app owns this."
+`convex/academicStructure.ts` being read-only *queries* is still accurate — the write
+side genuinely isn't built yet. What's changed is *where* it gets built: the separate
+admin web app repo, not a future pass of this one.
 
 ## Admin account
 

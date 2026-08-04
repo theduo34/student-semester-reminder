@@ -729,9 +729,12 @@ dot indicators — `app/(landing)/index.tsx`'s `DotIndicator` is the current exa
 
 ### Backend (`convex/`)
 
-`schema.ts` is the single source of truth for both the student and admin experiences
-this app now serves (see `AGENTS.md`'s Scope boundary — there's no second repo
-consuming a copy anymore). Auth tables come from `@convex-dev/auth`'s `authTables`,
+`schema.ts` is the single source of truth for both the student experience this app
+serves and the admin experience now built as a separate web app in a separate repo
+(see `AGENTS.md`'s Scope boundary) — one Convex backend, two client repos, not a
+copy of the schema maintained twice. See `CONVEX_BACKEND.md` at this repo's root for
+the schema/function inventory written for that other repo's agent. Auth tables come
+from `@convex-dev/auth`'s `authTables`,
 extended (not replaced) with `role` and `institutionId` on `users` — the documented
 `@convex-dev/auth` pattern (`defineTable({ ...authTables.users.validator.fields,
 role: ..., institutionId: ... })`, re-declaring the `email`/`phone` indexes) rather
@@ -1158,15 +1161,17 @@ resolved them.
   `heroui-native` + Uniwind imports (see Styling above), which does define the semantic
   tokens named in `AGENTS.md` — but if a different/custom token set was intended, it
   hasn't been applied yet.
-- **Resolved by the Admin foundation pass**: admin write mutations on
-  `semesters`/`courses`/`semesterActivities`/the institutional hierarchy tables now
-  have an obvious home — `role: 'admin'`-checked mutations in this same backend,
-  called from the `(admin)` route group's Hierarchy/Courses/Publish tabs once those
-  are built (not this pass — plumbing only, see AGENTS.md's Admin account section).
+- **Partially resolved by the Admin foundation pass, then re-scoped**: admin write
+  mutations on `semesters`/`courses`/`semesterActivities`/the institutional hierarchy
+  tables have an obvious *pattern* now — `role: 'admin'`-checked mutations, ctx.auth-
+  derived, same shape as this backend's student-owned tables (see Security in
+  AGENTS.md) — but no longer an obvious *repo*. They're called from the separate admin
+  web app repo now, not the `(admin)` route group's Hierarchy/Courses/Publish tabs (see
+  AGENTS.md's Scope boundary and `CONVEX_BACKEND.md`). Still no second Convex backend,
+  no second deployment — just a second client repo against this same one.
   `academicStructure.ts`/`courses.ts`/`alerts.ts#listBySemester` staying read-only
   *queries* is still accurate; it's specifically the write side that was unresolved,
-  and it's resolved now — no second app, no second deployment, just role-gated
-  mutations here.
+  and it's still unresolved here — the admin web app repo is where it gets built.
 - **`courseActivities.ts`'s `create`/`update`/`remove` mutations are still
   unauthenticated** (no ownership check, no auth check at all) and predate the domain
   clarification that admin — not students — owns course activities (see AGENTS.md).
