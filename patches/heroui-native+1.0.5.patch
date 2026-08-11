@@ -1,0 +1,39 @@
+diff --git a/node_modules/heroui-native/lib/module/components/menu/menu.js b/node_modules/heroui-native/lib/module/components/menu/menu.js
+index 4c5aa8f..c45245b 100644
+--- a/node_modules/heroui-native/lib/module/components/menu/menu.js
++++ b/node_modules/heroui-native/lib/module/components/menu/menu.js
+@@ -181,7 +181,7 @@ const MenuContentPopover = /*#__PURE__*/forwardRef(({
+   const {
+     height: screenHeight
+   } = useWindowDimensions();
+-  const isReady = Boolean(contentLayout?.y && contentLayout.y < screenHeight);
++  const isReady = contentLayout != null && contentLayout.y < screenHeight;
+   const insets = {
+     top: DEFAULT_INSETS.top + safeAreaInsets.top,
+     bottom: DEFAULT_INSETS.bottom + safeAreaInsets.bottom,
+diff --git a/node_modules/heroui-native/lib/module/components/popover/popover.js b/node_modules/heroui-native/lib/module/components/popover/popover.js
+index 14d2424..d0cfb3a 100644
+--- a/node_modules/heroui-native/lib/module/components/popover/popover.js
++++ b/node_modules/heroui-native/lib/module/components/popover/popover.js
+@@ -178,7 +178,7 @@ const PopoverContentPopover = /*#__PURE__*/forwardRef(({
+ 
+   // Initially useRelativePosition returns { position: 'absolute', opacity: 0, top: dimensions.height }
+   // So we need to wait for the content to be ready before showing it
+-  const isReady = Boolean(contentLayout?.y && contentLayout.y < screenHeight);
++  const isReady = contentLayout != null && contentLayout.y < screenHeight;
+   const insets = {
+     top: DEFAULT_INSETS.top + safeAreaInsets.top,
+     bottom: DEFAULT_INSETS.bottom + safeAreaInsets.bottom,
+diff --git a/node_modules/heroui-native/lib/module/components/select/select.js b/node_modules/heroui-native/lib/module/components/select/select.js
+index ece17c7..db066a2 100644
+--- a/node_modules/heroui-native/lib/module/components/select/select.js
++++ b/node_modules/heroui-native/lib/module/components/select/select.js
+@@ -253,7 +253,7 @@ const SelectContentPopover = /*#__PURE__*/forwardRef(({
+ 
+   // Initially useRelativePosition returns { position: 'absolute', opacity: 0, top: dimensions.height }
+   // So we need to wait for the content to be ready before showing it
+-  const isReady = Boolean(contentLayout?.y && contentLayout.y < screenHeight);
++  const isReady = contentLayout != null && contentLayout.y < screenHeight;
+   const insets = {
+     top: DEFAULT_INSETS.top + safeAreaInsets.top,
+     bottom: DEFAULT_INSETS.bottom + safeAreaInsets.bottom,

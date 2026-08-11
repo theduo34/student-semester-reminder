@@ -4,7 +4,6 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { HeroUINativeProvider } from 'heroui-native';
-import * as Notifications from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -17,6 +16,7 @@ import { useAlertsSync } from '@/hooks/useAlertsSync';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useNotificationObserver } from '@/hooks/use-notification-observer';
 import { usePushRegistration } from '@/hooks/usePushRegistration';
+import { useSafeLastNotificationResponse } from '@/hooks/use-safe-last-notification-response';
 import { authStorage } from '@/lib/authStorage';
 import { convex } from '@/lib/convexClient';
 
@@ -53,7 +53,7 @@ function RootNavigator() {
   // response object = the app was opened via a tapped notification. See
   // hooks/use-auth-gate.ts for the parallel read of this same value that skips the
   // landing carousel for the same reason.
-  const lastNotificationResponse = Notifications.useLastNotificationResponse();
+  const lastNotificationResponse = useSafeLastNotificationResponse();
 
   useEffect(() => {
     if (gate.status !== 'loading' && lastNotificationResponse !== undefined && !nativeSplashHidden) {
@@ -92,8 +92,9 @@ function RootNavigator() {
           <Stack.Screen name="(protected)" options={{ headerShown: false }} />
         </Stack.Protected>
         <Stack.Protected guard={gate.status === 'admin'}>
-          <Stack.Screen name="(admin)" options={{ headerShown: false }} />
+          <Stack.Screen name="admin-blocked" options={{ headerShown: false }} />
         </Stack.Protected>
+
         {/* fullScreenModal (not 'modal') — the New/Edit Reminder forms read as their own
             full screen, not an inset card peeking at what's behind it; ModalHeader's
             X/plus already gives them a "screen you close" feel, this makes the

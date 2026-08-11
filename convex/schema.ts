@@ -85,29 +85,38 @@ export default defineSchema({
     .index('by_isActive', ['isActive'])
     .index('by_academicYearId', ['academicYearId']),
 
-  // --- Institutional hierarchy. Admin-published, read-only from this app. ---
+  // --- Institutional hierarchy. Admin-published; writes are admin-only (requireAdmin,
+  // see convex/adminAuth.ts), reads are open to any signed-in caller. ---
   // Institution -> Faculty -> Department -> Program -> academicClass (Level+Session)
   // -> Division (optional). See AGENTS.md for the full model and why courses carry
   // academicClassId while schedule lives on the separate courseSections table.
 
   // Single row for now (Koforidua Technical University). Queries read the name/
   // emailDomain from here rather than hardcoding them, so it's a one-row edit if
-  // either is ever wrong or a second institution is ever onboarded.
+  // either is ever wrong or a second institution is ever onboarded. No admin mutation
+  // for name/emailDomain yet — creating a second institution is still a manual
+  // seed/dashboard edit. logoStorageId is admin-editable (see convex/institutions.ts)
+  // — a Convex file storage reference, optional since most institutions won't set one
+  // immediately after being seeded.
   institutions: defineTable({
     name: v.string(),
     emailDomain: v.string(),
+    logoStorageId: v.optional(v.id('_storage')),
   }),
 
+  // Admin CRUD: academicStructure.ts's createFaculty/updateFaculty/removeFaculty.
   faculties: defineTable({
     institutionId: v.id('institutions'),
     name: v.string(),
   }).index('by_institutionId', ['institutionId']),
 
+  // Admin CRUD: academicStructure.ts's createDepartment/updateDepartment/removeDepartment.
   departments: defineTable({
     facultyId: v.id('faculties'),
     name: v.string(),
   }).index('by_facultyId', ['facultyId']),
 
+  // Admin CRUD: academicStructure.ts's createProgram/updateProgram/removeProgram.
   programs: defineTable({
     departmentId: v.id('departments'),
     name: v.string(),
@@ -117,6 +126,9 @@ export default defineSchema({
   // and what a course is scheduled against. The compound index both enforces the
   // natural uniqueness of that triple and is the reverse lookup used to resolve the
   // Profile Setup picker chain (Program -> Level -> Session -> this row's _id).
+  // Admin CRUD: academicStructure.ts's createAcademicClass/updateAcademicClass/
+  // removeAcademicClass — update/remove are both blocked once anything downstream
+  // (divisions/courses/studentProfiles) references the row, see that file.
   academicClasses: defineTable({
     programId: v.id('programs'),
     level: v.number(),
@@ -124,7 +136,8 @@ export default defineSchema({
   }).index('by_program_level_session', ['programId', 'level', 'session']),
 
   // Optional subdivision of an academicClass (A-E). A class with none simply has zero
-  // rows here — see listDivisionsByClass in academicStructure.ts.
+  // rows here — see listDivisionsByClass in academicStructure.ts. Admin CRUD:
+  // createDivision/updateDivision/removeDivision in the same file.
   divisions: defineTable({
     academicClassId: v.id('academicClasses'),
     label: v.string(),
@@ -138,7 +151,13 @@ export default defineSchema({
     courseCode: v.string(),
     courseTitle: v.string(),
     colourTag: v.string(),
-  }).index('by_semesterId_and_academicClassId', ['semesterId', 'academicClassId']),
+  })
+    .index('by_semesterId_and_academicClassId', ['semesterId', 'academicClassId'])
+    // Every course in a class regardless of semester — courseActivities.ts's
+    // listForStudent needs "all my courses across any semester I've ever been
+    // enrolled for," which the compound index above can't serve on its own since
+    // semesterId is its required prefix key.
+    .index('by_academicClassId', ['academicClassId']),
 
   // Admin-published, read-only queries only as of this pass (same as courses above).
   // Schedule (day/time/venue) varies by division; course activities below don't —
@@ -151,9 +170,19 @@ export default defineSchema({
     venue: v.optional(v.string()),
   }).index('by_courseId', ['courseId']),
 
-  // Owned by this app. Assignments, quizzes, projects, and exams all live in one entity.
+  // Admin-owned and shared: ONE row per activity, published once regardless of how
+  // many students are enrolled in the course — assignments, quizzes, projects, and
+  // exams all live in this one entity. Completion is per-student and lives on a
+  // separate table (courseActivityCompletions, below) rather than on this row, for two
+  // reasons: (1) this row previously carried `studentId` + `status` directly, which
+  // meant seed.ts had to insert one full duplicate row per enrolled student for the
+  // same assignment — the exact thing "admin-owned, shared across the class" (see
+  // AGENTS.md) was supposed to mean but the data never actually was; (2) a shared row
+  // means a student who joins the class after an activity is published still sees it —
+  // visibility is computed at read time from the student's academicClassId matching
+  // the course's, never from a per-student row existing. See
+  // convex/courseActivities.ts#resolveCourseActivitiesForStudent for the read-side join.
   courseActivities: defineTable({
-    studentId: v.id('users'),
     courseId: v.id('courses'),
     title: v.string(),
     activityType: v.union(
@@ -164,11 +193,28 @@ export default defineSchema({
     ),
     dueDate: v.number(),
     priority: priorityValidator,
-    status: activityStatusValidator,
     notes: v.optional(v.string()),
+    // TEMPORARY, migration-only — see convex/cleanupLegacyCourseActivities.ts. Existing
+    // rows on the dev deployment still carry these from before this table became a
+    // shared definition row; Convex schema validation rejects undeclared extra fields
+    // outright, so they have to be declared optional here just long enough to run a
+    // one-off cleanup mutation, then removed again. Never write to these going forward.
+    studentId: v.optional(v.id('users')),
+    status: v.optional(activityStatusValidator),
+  }).index('by_courseId', ['courseId']),
+
+  // One row per (courseActivity, student) — created/patched only when a student
+  // actually marks something complete (courseActivities.ts#updateStatus). Absence of a
+  // row for a given (courseActivityId, studentId) pair means PENDING, the default, so
+  // publishing an activity never requires fanning out a row per enrolled student.
+  courseActivityCompletions: defineTable({
+    courseActivityId: v.id('courseActivities'),
+    studentId: v.id('users'),
+    status: activityStatusValidator,
   })
+    .index('by_studentId_courseActivityId', ['studentId', 'courseActivityId'])
     .index('by_studentId', ['studentId'])
-    .index('by_courseId', ['courseId']),
+    .index('by_courseActivityId', ['courseActivityId']),
 
   // Admin-published institutional events (registration, exam periods, campus events).
   // Always CRITICAL priority and non-dismissible. Read-only from this app. Institution-
@@ -245,7 +291,13 @@ export default defineSchema({
     // student's profile is created doesn't retroactively alert on the entire existing
     // catalogue of institutional events.
     lastSeenAlertsAt: v.optional(v.number()),
-  }).index('by_userId', ['userId']),
+  })
+    .index('by_userId', ['userId'])
+    // Which students belong to a given academicClass — needed to resolve "who's
+    // enrolled in this course" from the other direction (course -> academicClassId ->
+    // students), e.g. convex/courseActivities.ts's listOverduePending fanning an
+    // overdue courseActivity out to every enrolled student who hasn't completed it.
+    .index('by_academicClassId', ['academicClassId']),
 
   // Owned by this app. One row per (student, priority) — how far ahead of a due date
   // to fire local reminders for that priority tier. Settings' reminder-timing rows read

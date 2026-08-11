@@ -25,9 +25,28 @@ export const resolveById = query({
     const courseActivityId = ctx.db.normalizeId('courseActivities', entityId);
     if (courseActivityId !== null) {
       const activity = await ctx.db.get(courseActivityId);
-      if (activity !== null && activity.studentId === userId) {
+      if (activity !== null) {
         const course = await ctx.db.get(activity.courseId);
-        return { kind: 'course' as const, activity, course };
+        const profile = await ctx.db
+          .query('studentProfiles')
+          .withIndex('by_userId', (q) => q.eq('userId', userId))
+          .unique();
+        // Ownership is "does this activity's course belong to my own academicClass"
+        // now, not a stored studentId — courseActivities is a shared, admin-owned
+        // definition row (see schema.ts), not a per-student one.
+        if (course !== null && profile !== null && course.academicClassId === profile.academicClassId) {
+          const completion = await ctx.db
+            .query('courseActivityCompletions')
+            .withIndex('by_studentId_courseActivityId', (q) =>
+              q.eq('studentId', userId).eq('courseActivityId', courseActivityId),
+            )
+            .unique();
+          return {
+            kind: 'course' as const,
+            activity: { ...activity, status: completion?.status ?? ('PENDING' as const) },
+            course,
+          };
+        }
       }
     }
 

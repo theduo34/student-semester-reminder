@@ -53,6 +53,12 @@ const MAPPING = {
   // celebration above.
   'building.2.fill': 'account-tree',
   'megaphone.fill': 'campaign',
+  // Admin dashboard stat tiles — see app/(admin)/(tabs)/index.tsx.
+  'person.3.fill': 'groups',
+  'building.columns.fill': 'account-balance',
+  // app/admin-blocked.tsx — an admin session landing on mobile is pointed at the web
+  // dashboard instead.
+  'desktopcomputer': 'computer',
 } as IconMapping;
 
 /**

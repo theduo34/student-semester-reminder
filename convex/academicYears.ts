@@ -2,12 +2,13 @@ import { getAuthUserId } from '@convex-dev/auth/server';
 
 import { query } from './_generated/server';
 import { Doc } from './_generated/dataModel';
+import { CourseActivityWithStatus, resolveCourseActivitiesForStudent } from './courseActivities';
 
 export type SemesterBreakdown = {
   semester: Doc<'semesters'>;
   semesterActivities: Doc<'semesterActivities'>[];
   personalReminders: Doc<'personalReminders'>[];
-  courseActivities: Doc<'courseActivities'>[];
+  courseActivities: CourseActivityWithStatus[];
 };
 
 // Backs Home's Academic Year Progress card and its own detail screen (see AGENTS.md's
@@ -51,15 +52,6 @@ export const getCurrentYearOverview = query({
       .withIndex('by_userId', (q) => q.eq('userId', userId))
       .unique();
 
-    // Fetched once, filtered per semester below via each semester's own course set —
-    // courseActivities has no semesterId of its own (it inherits one through its
-    // course, see schema.ts), so this is cheaper than re-querying by_studentId per
-    // semester for what's ultimately the same small row set at this app's scale.
-    const allMyCourseActivities = await ctx.db
-      .query('courseActivities')
-      .withIndex('by_studentId', (q) => q.eq('studentId', userId))
-      .collect();
-
     const semesters: SemesterBreakdown[] = await Promise.all(
       yearSemesters.map(async (semester) => {
         const semesterActivities = await ctx.db
@@ -72,7 +64,7 @@ export const getCurrentYearOverview = query({
           .withIndex('by_userId_and_semesterId', (q) => q.eq('userId', userId).eq('semesterId', semester._id))
           .collect();
 
-        let courseActivities: Doc<'courseActivities'>[] = [];
+        let courseActivities: CourseActivityWithStatus[] = [];
         if (profile !== null) {
           const courses = await ctx.db
             .query('courses')
@@ -80,8 +72,11 @@ export const getCurrentYearOverview = query({
               q.eq('semesterId', semester._id).eq('academicClassId', profile.academicClassId),
             )
             .collect();
-          const courseIds = new Set(courses.map((course) => course._id));
-          courseActivities = allMyCourseActivities.filter((activity) => courseIds.has(activity.courseId));
+          courseActivities = await resolveCourseActivitiesForStudent(
+            ctx,
+            userId,
+            new Set(courses.map((course) => course._id)),
+          );
         }
 
         return { semester, semesterActivities, personalReminders, courseActivities };

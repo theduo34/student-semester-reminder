@@ -9,12 +9,8 @@ import { ActivityCard } from '@/components/shared/ActivityCard';
 import { CircularProgress } from '@/components/shared/CircularProgress';
 import { api } from '@/convex/_generated/api';
 import { mapCourseActivity, mapPersonalReminder, mapSemesterActivity, UnifiedActivity } from '@/lib/activityMapping';
+import { formatDateRange } from '@/lib/dateFormat';
 import { computeSemesterProgress } from '@/lib/semesterProgress';
-
-function formatDateRange(startMs: number, endMs: number): string {
-  const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-  return `${new Date(startMs).toLocaleDateString(undefined, opts)} – ${new Date(endMs).toLocaleDateString(undefined, opts)}`;
-}
 
 type SemesterView = {
   id: string;

@@ -248,6 +248,50 @@ async function upsertCourseSection(
   return ctx.db.insert('courseSections', { courseId, divisionId, scheduleDays, scheduleTime, venue });
 }
 
+// courseActivities is admin-owned and shared (see schema.ts) — one row per activity
+// regardless of how many students are enrolled, natural-keyed by (courseId, title)
+// same idempotency convention as every other seed helper in this file.
+async function upsertCourseActivity(
+  ctx: MutationCtx,
+  courseId: Id<'courses'>,
+  title: string,
+  activityType: 'ASSIGNMENT' | 'QUIZ' | 'PROJECT' | 'EXAM',
+  dueDate: number,
+  priority: 'CRITICAL' | 'IMPORTANT' | 'FLEXIBLE',
+  notes?: string,
+) {
+  const existing = await ctx.db
+    .query('courseActivities')
+    .withIndex('by_courseId', (q) => q.eq('courseId', courseId))
+    .collect();
+  const found = existing.find((row) => row.title === title);
+  if (found !== undefined) return found._id;
+  return ctx.db.insert('courseActivities', { courseId, title, activityType, dueDate, priority, notes });
+}
+
+// Completion is per-student, tracked separately from the shared definition row above
+// (see schema.ts's courseActivityCompletions table) — this is what seedActivities'
+// `status: 'COMPLETED'` entries actually write.
+async function markCourseActivityCompleted(
+  ctx: MutationCtx,
+  courseActivityId: Id<'courseActivities'>,
+  studentId: Id<'users'>,
+) {
+  const existing = await ctx.db
+    .query('courseActivityCompletions')
+    .withIndex('by_studentId_courseActivityId', (q) =>
+      q.eq('studentId', studentId).eq('courseActivityId', courseActivityId),
+    )
+    .unique();
+  if (existing !== null) {
+    if (existing.status !== 'COMPLETED') {
+      await ctx.db.patch(existing._id, { status: 'COMPLETED' });
+    }
+    return;
+  }
+  await ctx.db.insert('courseActivityCompletions', { courseActivityId, studentId, status: 'COMPLETED' });
+}
+
 async function upsertSemesterActivity(
   ctx: MutationCtx,
   semesterId: Id<'semesters'>,
@@ -778,14 +822,26 @@ export const getInstitutionId = internalQuery({
   },
 });
 
-type CourseActivitySeed = Omit<Doc<'courseActivities'>, '_id' | '_creationTime' | 'studentId'>;
+// `status` here isn't a courseActivities field anymore (see schema.ts) — it's a
+// seed-only instruction to markCourseActivityCompleted the demo student's completion
+// row after the shared definition row is upserted, not stored on the definition itself.
+type CourseActivitySeed = {
+  courseId: Id<'courses'>;
+  title: string;
+  activityType: 'ASSIGNMENT' | 'QUIZ' | 'PROJECT' | 'EXAM';
+  dueDate: number;
+  priority: 'CRITICAL' | 'IMPORTANT' | 'FLEXIBLE';
+  status: 'PENDING' | 'COMPLETED';
+  notes?: string;
+};
 
 // Course activities + semester activities across a realistic time distribution —
 // overdue, due today (two, at different priorities), due soon, due later, and already
 // completed, so every countdown/urgency state on the Activity Details and Calendar
 // screens has at least one real example. Requires seedCourses and seedDemoStudent to
-// have already run (course activities are scoped to a specific student, see
-// convex/courseActivities.ts's schema note).
+// have already run. Each activity is published once (courseActivities is admin-owned
+// and shared, see schema.ts) — only the demo student's own completion state is
+// per-student here.
 export const seedActivities = internalMutation({
   args: {},
   handler: async (ctx) => {
@@ -849,14 +905,19 @@ export const seedActivities = internalMutation({
       { courseId: cs305._id, title: 'Assignment 2', activityType: 'ASSIGNMENT', dueDate: atOffset(-8, 23, 59), priority: 'IMPORTANT', status: 'COMPLETED' },
     ];
 
-    const existing = await ctx.db
-      .query('courseActivities')
-      .withIndex('by_studentId', (q) => q.eq('studentId', demoUser._id))
-      .collect();
-    const existingKeys = new Set(existing.map((row) => `${row.courseId}:${row.title}`));
     for (const activity of activities) {
-      if (existingKeys.has(`${activity.courseId}:${activity.title}`)) continue;
-      await ctx.db.insert('courseActivities', { studentId: demoUser._id, ...activity });
+      const activityId = await upsertCourseActivity(
+        ctx,
+        activity.courseId,
+        activity.title,
+        activity.activityType,
+        activity.dueDate,
+        activity.priority,
+        activity.notes,
+      );
+      if (activity.status === 'COMPLETED') {
+        await markCourseActivityCompleted(ctx, activityId, demoUser._id);
+      }
     }
   },
 });
@@ -905,14 +966,19 @@ export const seedPastSemesterActivities = internalMutation({
       { courseId: courseIds['CS 205'], title: 'Final Project', activityType: 'PROJECT', dueDate: atOffset(-62, 23, 59), priority: 'IMPORTANT', status: 'PENDING' },
     ];
 
-    const existing = await ctx.db
-      .query('courseActivities')
-      .withIndex('by_studentId', (q) => q.eq('studentId', demoUser._id))
-      .collect();
-    const existingKeys = new Set(existing.map((row) => `${row.courseId}:${row.title}`));
     for (const activity of pastActivities) {
-      if (existingKeys.has(`${activity.courseId}:${activity.title}`)) continue;
-      await ctx.db.insert('courseActivities', { studentId: demoUser._id, ...activity });
+      const activityId = await upsertCourseActivity(
+        ctx,
+        activity.courseId,
+        activity.title,
+        activity.activityType,
+        activity.dueDate,
+        activity.priority,
+        activity.notes,
+      );
+      if (activity.status === 'COMPLETED') {
+        await markCourseActivityCompleted(ctx, activityId, demoUser._id);
+      }
     }
 
     await upsertPastSemesterActivity(
@@ -969,9 +1035,9 @@ export const seedDemoAlerts = internalMutation({
       if (course === null) throw new Error(`Run seedCourses first (missing ${courseCode})`);
       const rows = await ctx.db
         .query('courseActivities')
-        .withIndex('by_studentId', (q) => q.eq('studentId', demoUser._id))
+        .withIndex('by_courseId', (q) => q.eq('courseId', course._id))
         .collect();
-      const activity = rows.find((row) => row.courseId === course._id && row.title === title);
+      const activity = rows.find((row) => row.title === title);
       if (activity === undefined) throw new Error(`Run seedActivities first (missing ${title})`);
       return { activity, course };
     };

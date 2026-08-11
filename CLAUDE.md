@@ -195,20 +195,53 @@ Three Convex deployments exist for this project:
   overrides to `null` rather than this file changing at all — see the Admin route
   group section below.
 - `app/(admin)/` — the role-gated admin experience living in this same app (see
-  AGENTS.md's Scope boundary and Admin account sections) — not a separate app/repo.
-  `_layout.tsx` is a bare `Stack` wrapping `(tabs)`, mirroring `(protected)/_layout.tsx`'s
-  shape (future pushed admin detail screens register here as siblings of `(tabs)`, same
-  standing rule as the student side's Nested navigation section below).
-  `(tabs)/_layout.tsx` reuses the exact same `AppTabBar` the student side uses — same
-  icon+label grammar, same `--accent` active-state coloring — just four different
-  routes (Dashboard/Hierarchy/Courses/Publish) and `centerAction={null}`: admin has no
-  FAB, since admin's creation actions live inside their own tabs (a "New institutional
-  event" button on Publish, a "New course" button on Courses, etc.), not behind one
-  shared quick-create button the way the student FAB is. All four tab screens are
-  `components/shared/PlaceholderScreen.tsx` placeholders as of this pass (Screen +
-  AppTopBar + centered "___ coming soon" text, the same visual grammar as any other
-  empty state in the app, not a debug page) — Hierarchy/Courses/Publish CRUD are later
-  passes, not built here.
+  AGENTS.md's Scope boundary and Admin account sections) — not a separate app/repo,
+  reached from the same single login screen every student uses. `_layout.tsx` is a bare
+  `Stack` wrapping `(tabs)`, mirroring `(protected)/_layout.tsx`'s shape (pushed admin
+  detail screens register here as siblings of `(tabs)`, same standing rule as the
+  student side's Nested navigation section below — the four Hierarchy drill-down
+  screens are the current example). `(tabs)/_layout.tsx` reuses the exact same
+  `AppTabBar` the student side uses — same icon+label grammar, same `--accent`
+  active-state coloring — just four different routes (Dashboard/Hierarchy/Courses/
+  Publish) and `centerAction={null}`: admin has no FAB, since admin's creation actions
+  live inside their own tabs (a "New institutional event" button on Publish, a "New
+  course" button on Courses, etc.), not behind one shared quick-create button the way
+  the student FAB is.
+  - **Dashboard** (`(tabs)/index.tsx`) — deliberately styled after student Home, not a
+    typical web-admin sidebar+top-title-bar layout: `HomeHeader` (the same component
+    Home uses — date + "Hello, {name}" + tappable `Avatar`, reused as-is since its
+    props were already generic) as the header, reusing `Avatar`'s tap slot for a
+    sign-out `ConfirmDialog` instead of Home's profile-screen navigation (admin has no
+    profile detail screen yet). Body: an accent-filled institution/active-semester
+    banner (visually matching Home's `ProgressCard` band), a 2×2 stat-tile grid
+    (students/faculties/departments/courses) from `api.adminDashboard.getOverview` —
+    one aggregate query, not one round-trip per stat, see that file's own comment for
+    why every table below `faculties` needs manual scoping — and a students-by-faculty
+    breakdown list. Same two-state loading pattern as every other screen (a skeleton
+    shaped like the real content while `overview`/`viewer` are `undefined`).
+  - **Hierarchy** (`(tabs)/hierarchy/index.tsx` + `app/(admin)/hierarchy/*`) — full
+    Faculty→Department→Program→academicClass→Division CRUD, `AppTopBar` (plain title +
+    an `AddHeaderButton` "+" action) rather than `HomeHeader`'s greeting style, the same
+    way every non-landing-tab screen elsewhere in this app (Calendar, Alerts, Settings)
+    uses `AppTopBar` while only Home gets the richer greeting header — Dashboard is
+    admin's Home-equivalent, Hierarchy is admin's Calendar-equivalent, not two competing
+    header styles. Row actions live behind `HierarchyList`'s "..." `ActionSheet` menu
+    (Edit/Delete) rather than a persistent pencil/trash pair — five hierarchy levels'
+    worth of rows showing two icons each would be noisier than a menu; Add/Edit reuse
+    `EditFieldModal` (every level here is just a name/label), Delete goes through
+    `ConfirmDialog` and surfaces the mutation's own blocked-delete message ("still has
+    departments", ...) via toast on failure rather than a generic error. Each drill-down
+    screen (`hierarchy/faculty/[facultyId]`, `.../department/[departmentId]`, `.../
+    program/[programId]`, `.../class/[academicClassId]`) sets its own dynamic
+    `Stack.Screen` title (the tapped row's own name) the same way
+    `academic-year/index.tsx` does for data `app/(admin)/_layout.tsx`'s static config
+    doesn't have.
+  - **Courses** and **Publish** (`(tabs)/courses/index.tsx`, `(tabs)/publish/index.tsx`)
+    are still `components/shared/PlaceholderScreen.tsx` stand-ins (Screen + AppTopBar +
+    centered "___ coming soon" text) — build their CRUD here, following Hierarchy's
+    pattern (`requireAdmin`-gated mutations in `convex/`, `AppTopBar` + `AddHeaderButton`
+    + `EditFieldModal`/a dedicated form + `ConfirmDialog` on the client), not in a
+    separate app.
 - `app/add-activity.tsx`, `app/edit-activity/[entityId].tsx` — root-level modals
   (`presentation: "fullScreenModal"`, not the card-inset `"modal"` — these read as their
   own full screen, not a peek at what's behind them; `UIModalPresentationFullScreen` on
@@ -662,6 +695,17 @@ via `useSyncExternalStore` (see `app/(landing)/`'s bullet above), not local stat
 the gate re-evaluates the instant the carousel marks itself seen — no reload needed,
 same as any other gate transition.
 
+**One app, one login, role-gated route groups — settled after two reversals.** A prior
+pass briefly split admin out into its own web app repo (`termio-admin`) and blocked
+`role === 'admin'` from reaching `(admin)/(tabs)` on mobile at all (routing it to a
+now-deleted `admin-blocked` screen instead). That split is reverted — see AGENTS.md's
+Scope boundary for the full history. There is one Expo app, reachable on any platform
+Expo builds for, one login screen (`app/(auth)/index.tsx`, no role picker, no separate
+admin sign-in form), and the gate above is the only thing that decides which
+experience a session lands in. Nothing about `role` itself changed (still set once, at
+account-creation time, see AGENTS.md's Admin account section) — this only changed
+which route group a mobile session with `role === 'admin'` is allowed to reach.
+
 `unverified` is defensive rather than reachable in normal use — Convex Auth never
 issues session tokens for an unverified Password-provider account, so the real
 verify-email redirect happens at the point of the `signIn`/`signUp` call in
@@ -729,12 +773,9 @@ dot indicators — `app/(landing)/index.tsx`'s `DotIndicator` is the current exa
 
 ### Backend (`convex/`)
 
-`schema.ts` is the single source of truth for both the student experience this app
-serves and the admin experience now built as a separate web app in a separate repo
-(see `AGENTS.md`'s Scope boundary) — one Convex backend, two client repos, not a
-copy of the schema maintained twice. See `CONVEX_BACKEND.md` at this repo's root for
-the schema/function inventory written for that other repo's agent. Auth tables come
-from `@convex-dev/auth`'s `authTables`,
+`schema.ts` is the single source of truth for both the student and admin experiences,
+both served from this one app (see `AGENTS.md`'s Scope boundary) — one Convex backend,
+one client. Auth tables come from `@convex-dev/auth`'s `authTables`,
 extended (not replaced) with `role` and `institutionId` on `users` — the documented
 `@convex-dev/auth` pattern (`defineTable({ ...authTables.users.validator.fields,
 role: ..., institutionId: ... })`, re-declaring the `email`/`phone` indexes) rather
@@ -779,10 +820,27 @@ than a parallel `adminProfiles` table. See AGENTS.md's Admin account section for
   (`modifyAccountCredentials`) and refreshes `name`/`institutionId`
   (`admins.ts#setAdminFields`, an `internalMutation` — actions can't `ctx.db.patch`
   directly) instead of erroring — the entire MVP "forgot admin password" story.
-- `academicStructure.ts` — read-only institutional hierarchy queries (Faculty through
-  Division), see AGENTS.md, plus `getFullHierarchy` — resolves an entire profile's
-  faculty/department/academicClass/division ids to human-readable names in one call
-  (profile detail screen's ACADEMIC group, the cascading edit picker's pre-fill).
+- `academicStructure.ts` — institutional hierarchy (Faculty through Division), see
+  AGENTS.md. Read queries (`listFaculties`, ...) are open to any signed-in caller —
+  every student needs these for Profile Setup/cascading edits — plus `getFullHierarchy`,
+  which resolves an entire profile's faculty/department/academicClass/division ids to
+  human-readable names in one call (profile detail screen's ACADEMIC group, the
+  cascading edit picker's pre-fill). Writes (`createFaculty`/`updateFaculty`/
+  `removeFaculty` and the matching triple for Department/Program/Division, plus
+  `createAcademicClass`/`updateAcademicClass`/`removeAcademicClass`) are admin-only,
+  gated by `convex/adminAuth.ts#requireAdmin` — the shared guard every future admin
+  mutation (Courses, Publish) should reuse rather than a new ad hoc check. Faculty
+  creation resolves `institutionId` server-side via `adminAuth.ts#resolveAdminInstitutionId`,
+  never client-passed. Create mutations reject a duplicate name/label within the same
+  parent (courtesy validation); `academicClasses`' update/remove are blocked outright
+  once anything downstream (`divisions`/`courses`/`studentProfiles`) references the row
+  — level/session/program are that row's identity, and a guided reassignment flow (like
+  `studentProfiles.updateAcademicHierarchy`'s orphan-nulling on the student side) is a
+  bigger feature this pass didn't build; blocking is the safe default instead. Two of
+  those dependent-checks (`courses`/`studentProfiles` have no index on
+  `academicClassId`; `courseSections`/`studentProfiles` have none on `divisionId`) are
+  full-table scans — same "fine at this app's demo scale, flagged not fixed" posture as
+  `courseActivities.ts`/`personalReminders.ts`'s overdue-sweep queries.
 - `academicYears.ts` — `getCurrentYearOverview`, the Academic Year Progress screen's one
   query. `ctx.auth`-derived, never a client-passed studentId. Resolves the AcademicYear
   containing the currently-active semester, then gathers both semesters'
@@ -1161,22 +1219,18 @@ resolved them.
   `heroui-native` + Uniwind imports (see Styling above), which does define the semantic
   tokens named in `AGENTS.md` — but if a different/custom token set was intended, it
   hasn't been applied yet.
-- **Partially resolved by the Admin foundation pass, then re-scoped**: admin write
-  mutations on `semesters`/`courses`/`semesterActivities`/the institutional hierarchy
-  tables have an obvious *pattern* now — `role: 'admin'`-checked mutations, ctx.auth-
-  derived, same shape as this backend's student-owned tables (see Security in
-  AGENTS.md) — but no longer an obvious *repo*. They're called from the separate admin
-  web app repo now, not the `(admin)` route group's Hierarchy/Courses/Publish tabs (see
-  AGENTS.md's Scope boundary and `CONVEX_BACKEND.md`). Still no second Convex backend,
-  no second deployment — just a second client repo against this same one.
-  `academicStructure.ts`/`courses.ts`/`alerts.ts#listBySemester` staying read-only
-  *queries* is still accurate; it's specifically the write side that was unresolved,
-  and it's still unresolved here — the admin web app repo is where it gets built.
-- **`courseActivities.ts`'s `create`/`update`/`remove` mutations are still
-  unauthenticated** (no ownership check, no auth check at all) and predate the domain
-  clarification that admin — not students — owns course activities (see AGENTS.md).
-  Nothing in this app calls them anymore. Not removed in this pass since the upcoming
-  Courses-tab pass is the natural place to either delete them outright or replace them
-  with a proper `role === 'admin'`-checked equivalent — this pass didn't touch
-  `courseActivities.ts` at all, so the gap is unchanged, just no longer waiting on a
-  hypothetical second app to resolve it.
+- **`courseActivities.ts`'s `create`/`update`/`remove` are still unauthenticated** (no
+  ownership check, no auth check at all) and predate the domain clarification that
+  admin — not students — owns course activities (see AGENTS.md). Nothing in this app
+  calls them anymore. Fixing them isn't just "add `requireAdmin`" — the table has a
+  required `studentId` field and `seed.ts` inserts one row *per student* for the same
+  assignment (confirmed by reading `seed.ts`'s `ctx.db.insert('courseActivities',
+  { studentId: demoUser._id, ...activity })` call), which contradicts this file's own
+  domain model ("one entity, admin-owned, shared across all divisions of a class") —
+  admin-owned-and-shared isn't actually how the data is shaped today. A real fix means
+  choosing between (a) keep the per-student-row shape and fan out one insert per
+  enrolled student per activity on create, or (b) split into a shared admin-owned
+  activity-definition row plus a separate per-student completion-tracking row — which
+  ripples into `activities.ts`'s resolver, `overdueSweep.ts`, `alerts.ts`, and the
+  client's activity mapping. Not decided in this pass — whoever builds the Courses tab
+  (`app/(admin)/(tabs)/courses/index.tsx`, currently a placeholder) makes this call.

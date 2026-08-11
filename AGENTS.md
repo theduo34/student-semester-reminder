@@ -42,33 +42,37 @@ codes/titles/activity content are invented example data by design, nothing to ve
 
 ## Scope boundary — read before building anything
 
-**Plan history, corrected here rather than left contradicting the code**: earlier
-passes described a separate Next.js Academic Admin web app as the owner of semester-
-publishing and course-catalogue management. That plan was superseded by the Admin
-foundation pass, which folded admin into this same Expo app instead (the `(admin)`
-route group, see "Admin account" below) — one codebase, one Convex backend, two
-experiences gated by `users.role` at the routing layer.
+**Plan history, corrected here rather than left contradicting the code**: this has
+swung twice before landing here. First, a separate Next.js Academic Admin web app was
+the plan. That was superseded by folding admin into this same Expo app (the `(admin)`
+route group). That, in turn, was briefly superseded by splitting admin back out into
+its own web app repo (`termio-admin`) — an admin account was blocked from reaching
+`(admin)` on mobile entirely, and the in-app route group sat unreachable. **That split
+is reverted, and this is the settled architecture going forward**: one app, one
+codebase, one Convex backend, one login — `role` decides which route group a signed-in
+session reaches, not which app/URL they're on. There is no separate admin web app and
+none is planned; don't reintroduce that split.
 
-**That has been superseded again.** The admin dashboard is now being built as its own
-web app, in its own separate repo — the in-app `(admin)` route group approach didn't
-stick. This is still one Convex backend, one set of deployments — the web app is a
-second *client* against the same project, not a second backend and not a second
-deployment. See `CONVEX_BACKEND.md` at this repo's root for the schema/function
-inventory and known gaps written specifically for that repo's agent to work from.
+The `(admin)` route group (`app/(admin)/`) is real, reachable, and where admin CRUD
+gets built — `app/(admin)/(tabs)/hierarchy/index.tsx` (institutional hierarchy CRUD)
+and `app/(admin)/(tabs)/index.tsx` (Dashboard) are already live examples, not
+placeholders to route around. `app/(admin)/hierarchy/*` (the Faculty/Department/
+Program/academicClass drill-down screens) and `components/features/admin/*`
+(`HierarchyList`, `AcademicClassFormModal`, `AddHeaderButton`) are wired into the
+navigator and in active use. Courses and Publish (`app/(admin)/(tabs)/courses`,
+`.../publish`) are still `PlaceholderScreen` stand-ins — build their CRUD here, the
+same way Hierarchy was built, not in a separate repo.
 
-Practical effect on this repo: the `(admin)` route group (`app/(admin)/`) still
-exists with its placeholder tab screens (see "Admin account" and CLAUDE.md's Routing
-section) and isn't being ripped out, but it's no longer where admin CRUD gets built
-out — don't extend Hierarchy/Courses/Publish here under the old plan. Real admin
-write mutations (institutional hierarchy, courses, courseSections, semesters,
-academicYears, semesterActivities) get designed and added from the admin web app repo
-against this same backend, following the `role === 'admin'`-checked, ctx.auth-derived
-pattern this repo already uses for student-owned tables (see Security above).
-
-`convex/semesters.ts`, `convex/courses.ts`, `convex/alerts.ts`, and
-`convex/academicStructure.ts` being read-only *queries* is still accurate — the write
-side genuinely isn't built yet. What's changed is *where* it gets built: the separate
-admin web app repo, not a future pass of this one.
+`convex/semesters.ts`, `convex/courses.ts`, and `convex/alerts.ts` being read-only
+*queries* here is still accurate for now — the write side isn't built yet for those.
+**Institutional-hierarchy management is no longer in that category**:
+`convex/academicStructure.ts` has `requireAdmin`-gated create/update/remove mutations
+for Faculty/Department/Program/academicClass/Division (see `convex/adminAuth.ts` for
+the shared guard — `requireAdmin` + `resolveAdminInstitutionId` — reused by every
+future admin mutation, Courses/Publish included, rather than a new ad hoc check per
+file), called directly from the `(admin)` screens above. `convex/adminDashboard.ts`'s
+`getOverview` is the same pattern applied to a read: one aggregate query for the
+Dashboard tab's stat tiles instead of one round-trip per stat.
 
 ## Admin account
 
@@ -101,9 +105,12 @@ there's no verification-email flow for them at all.
 
 **Routing**: the auth gate's role check happens *before* the `studentProfile` check,
 not after — an admin has no `studentProfile` row and would otherwise fall into
-`needsProfile`. A logged-in, verified admin goes straight to `(admin)/(tabs)` and skips
-`(onboarding)` entirely — no profile setup, no semester wait, none of that applies to
-an institution-wide admin account. See CLAUDE.md's Onboarding gate section for the full
+`needsProfile`. A logged-in, verified admin goes straight to `(admin)/(tabs)` and
+never reaches `(onboarding)` or `(protected)` — no profile setup, no semester wait,
+none of that applies to an institution-wide admin account. There's exactly one login
+screen (`app/(auth)/index.tsx`) for both roles; which route group a session lands in
+is decided entirely by `hooks/use-auth-gate.ts` reading `role` after auth, never by
+anything picked at sign-in. See CLAUDE.md's Onboarding gate section for the full
 sequence.
 
 **Demo admin**: `admin@example.com` / `admin1234` (seeded by `convex/seed.ts`'s
@@ -142,8 +149,10 @@ sequence.
 
 Institution → Faculty → Department → Program → **academicClass** (Level + Session) →
 Division (optional). A student belongs to exactly one Faculty/Department/Program/Level/
-Session combination, and optionally one Division within it. Entirely Admin-published,
-read-only here (`convex/academicStructure.ts`).
+Session combination, and optionally one Division within it. Admin-published
+(`convex/academicStructure.ts`) — reads are open to any signed-in caller, writes are
+`requireAdmin`-gated (see CLAUDE.md's Backend section for the full mutation list and
+each level's dependent-row delete guard).
 
 - **Institution** — one row today (Koforidua Technical University,
   `emailDomain: "ktu.edu.gh"`), but the schema and every query already support more than

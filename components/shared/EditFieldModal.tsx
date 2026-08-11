@@ -28,12 +28,17 @@ type EditFieldModalProps = {
 };
 
 // The one single-field edit surface, reused for every editable row on the profile
-// detail screen (name, phone, institutional email, division) — see CLAUDE.md. Same
-// visual shape as the New/Edit Reminder modals (ModalHeader chrome), but presented via
-// React Native's own Modal rather than an Expo Router route: this component is
-// props-driven and rendered conditionally from wherever it's needed, not a fixed
-// screen — a route per field would mean re-deriving label/value/validate/mutation from
-// a param instead of just passing them in directly.
+// detail screen (name, phone, institutional email, division) and every admin
+// Hierarchy Add/Edit flow — see CLAUDE.md. Same visual shape as the New/Edit Reminder
+// modals (ModalHeader chrome), but presented via React Native's own Modal rather than
+// an Expo Router route: this component is props-driven and rendered conditionally from
+// wherever it's needed, not a fixed screen — a route per field would mean re-deriving
+// label/value/validate/mutation from a param instead of just passing them in directly.
+// `presentationStyle="fullScreen"`, not `"pageSheet"` — pageSheet already insets the
+// sheet from the top on iOS, and ModalHeader separately pads for the safe-area inset
+// itself (see that component), so the two together left a visible gap above the
+// header instead of it sitting flush against the top like every other modal in this
+// app (New/Edit Reminder, About, edit-academic-details).
 export function EditFieldModal({
   isOpen,
   onClose,
@@ -81,7 +86,7 @@ export function EditFieldModal({
   };
 
   return (
-    <Modal visible={isOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal visible={isOpen} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <View className="flex-1 bg-background">
         <ModalHeader
           title={title}

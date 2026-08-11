@@ -8,6 +8,7 @@ import { useCSSVariable } from 'uniwind';
 
 import { ActivityCard } from '@/components/shared/ActivityCard';
 import { HomeHeader } from '@/components/features/dashboard/HomeHeader';
+import { ProgressCard } from '@/components/shared/ProgressCard';
 import { Button } from '@/components/ui/Button';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Screen } from '@/components/ui/Screen';
@@ -139,6 +140,7 @@ export default function HomeScreen() {
             <Pressable onPress={goToAcademicYear} accessibilityRole="button" accessibilityLabel="View academic year progress">
               <ProgressCard
                 title={semester.title}
+                caption="Academic year progress"
                 {...computeSemesterProgress(semester.startDate, semester.endDate, now)}
               />
             </Pressable>
@@ -207,6 +209,7 @@ function Section({
   onPressActivity: (activity: UnifiedActivity) => void;
   onViewAll: () => void;
 }) {
+  const [accent] = useCSSVariable(['--accent']) as [string];
   const hasMore = count > limit;
   const visibleItems = items.slice(0, limit);
 
@@ -215,8 +218,9 @@ function Section({
       <View className="flex-row items-center justify-between">
         <Text className={`text-base font-bold ${isOverdue ? 'text-critical' : 'text-foreground'}`}>{title}</Text>
         {hasMore ? (
-          <Pressable onPress={onViewAll} hitSlop={8}>
-            <Text className="text-sm font-medium text-accent">View more →</Text>
+          <Pressable onPress={onViewAll} hitSlop={8} className="flex-row items-center gap-0.5">
+            <Text className="text-sm font-medium text-accent">View more</Text>
+            <IconSymbol name="chevron.right" size={14} color={accent} />
           </Pressable>
         ) : (
           <Text className={`text-sm ${isOverdue ? 'text-critical' : 'text-muted'}`}>{count}</Text>
@@ -243,37 +247,6 @@ function Section({
           ))}
         </View>
       )}
-    </View>
-  );
-}
-
-function ProgressCard({
-  title,
-  percent,
-  weeksRemaining,
-}: {
-  title: string;
-  percent: number;
-  weeksRemaining: number;
-}) {
-  const [accentForeground] = useCSSVariable(['--accent-foreground']) as [string];
-
-  return (
-    <View className="gap-3 rounded-md bg-accent p-4">
-      <View className="flex-row items-center justify-between">
-        <Text className="text-base font-medium text-accent-foreground">{title}</Text>
-        <Text className="text-base font-medium text-accent-foreground">{percent}%</Text>
-      </View>
-      <View className="h-2 overflow-hidden rounded-full bg-accent-foreground/20">
-        <View className="h-2 rounded-full bg-accent-foreground" style={{ width: `${percent}%` }} />
-      </View>
-      <View className="flex-row items-center justify-between">
-        <Text className="text-sm text-accent-foreground/80">{weeksRemaining} weeks remaining</Text>
-        <View className="flex-row items-center gap-1">
-          <Text className="text-xs font-medium text-accent-foreground/80">Academic year progress</Text>
-          <IconSymbol name="chevron.right" size={12} color={accentForeground} />
-        </View>
-      </View>
     </View>
   );
 }

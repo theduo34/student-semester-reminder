@@ -15,8 +15,10 @@ import { isValidEmail } from '@/lib/validation';
 
 type AuthTab = 'login' | 'register';
 
-// Login / register tabs, backed by the Convex Auth Password provider. No admin
-// sign-in link here — the Academic Admin app is a separate app entirely.
+// Login / register tabs, backed by the Convex Auth Password provider. One form for
+// both roles — no separate admin sign-in screen. Post-auth routing (student vs. admin
+// dashboard) is decided entirely by hooks/use-auth-gate.ts reading the signed-in
+// user's role, not by anything picked here.
 export default function AuthScreen() {
   const [tab, setTab] = useState<AuthTab>('login');
 

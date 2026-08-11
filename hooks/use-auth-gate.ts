@@ -1,8 +1,8 @@
 import { useConvexAuth, useQuery } from 'convex/react';
-import * as Notifications from 'expo-notifications';
 import { useSyncExternalStore } from 'react';
 
 import { api } from '@/convex/_generated/api';
+import { useSafeLastNotificationResponse } from '@/hooks/use-safe-last-notification-response';
 import { getHasSeenLandingSnapshot, subscribeHasSeenLanding } from '@/lib/landingStorage';
 
 export type AuthGate =
@@ -26,7 +26,7 @@ export function useAuthGate(): AuthGate {
   );
   // undefined = not resolved yet, null = resolved, nothing pending — only a genuine
   // response object should bypass landing, so treat both non-response states as "no."
-  const lastNotificationResponse = Notifications.useLastNotificationResponse();
+  const lastNotificationResponse = useSafeLastNotificationResponse();
   const cameFromNotificationTap = Boolean(lastNotificationResponse);
   const { isLoading: authLoading, isAuthenticated } = useConvexAuth();
   const viewer = useQuery(api.users.viewer, isAuthenticated ? {} : 'skip');
@@ -76,6 +76,8 @@ export function useAuthGate(): AuthGate {
   // at account-creation time (the register flow vs. convex/admins.ts's
   // createAdminAccount — see AGENTS.md's Admin account section) and never changes
   // after, so this is a stable branch point, not something that needs re-deriving.
+  // Admin is web-only (see termio-admin/AGENTS.md's Platform boundary section) — an
+  // admin session here lands on app/admin-blocked.tsx, not a route group in this app.
   if (viewer.role === 'admin') {
     return { status: 'admin' };
   }
