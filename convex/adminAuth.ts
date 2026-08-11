@@ -1,7 +1,7 @@
 import { getAuthUserId } from '@convex-dev/auth/server';
 
 import { Doc } from './_generated/dataModel';
-import { MutationCtx, QueryCtx } from './_generated/server';
+import { internalQuery, MutationCtx, QueryCtx } from './_generated/server';
 
 // Shared by every admin-only mutation (institutional hierarchy today, Courses/Publish
 // once those passes exist) — one guard, not one ad hoc auth check per file. Mirrors
@@ -20,6 +20,18 @@ export async function requireAdmin(ctx: QueryCtx | MutationCtx): Promise<Doc<'us
   }
   return user;
 }
+
+// Actions have no ctx.db (see documentImport.ts) — they can't call requireAdmin
+// directly, only via ctx.runQuery, which is what this wraps it for. Internal, not
+// public: the action calling it has already been reached through a public
+// mutation/action of its own, this is just the auth check riding along on the same
+// request, not a second entry point a client could call on its own.
+export const requireAdminForAction = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+  },
+});
 
 // Only `faculties` carries institutionId directly (see schema.ts) — resolving it here
 // rather than trusting a client-passed id keeps faculty creation consistent with every
