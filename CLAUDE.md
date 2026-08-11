@@ -788,17 +788,14 @@ than a parallel `adminProfiles` table. See AGENTS.md's Admin account section for
   by a path other than `convex/admins.ts`. `reset` is deliberately left unconfigured —
   forgot-password stays interface-only for students (see the auth pass); admins have a
   completely different, non-self-service reset path, see `admins.ts` below.
-  `profile()` ALSO rejects a signup whose email doesn't match a known institution
-  domain (`convex/institutionDomains.ts`'s static `KNOWN_INSTITUTION_DOMAINS` array,
-  thrown as a `ConvexError` so the message survives production's plain-`Error`
-  redaction — see `lib/authErrors.ts`) — gated to `params.flow === 'signUp'`
-  specifically, since this callback actually runs on every auth flow (signIn
-  included) but Convex Auth's Password provider only ever *uses* its return value on
-  the signUp branch. `convexAuth()`'s top-level `callbacks.afterUserCreatedOrUpdated`
-  (same file) does the actual `institutionId` resolution against the real
-  `institutions` table — split out from `profile()` because that callback runs
-  synchronously with no database access, while this one gets a real mutation ctx and
-  only ever fires for a brand-new credentials signup (never signIn). See AGENTS.md's
+  Signup is NOT gated by email domain — any email can register, `profile()` doesn't
+  inspect it. `convexAuth()`'s top-level `callbacks.afterUserCreatedOrUpdated` (same
+  file) does an opportunistic `institutionId` resolution against the real
+  `institutions` table — matches the signup email's domain directly against that
+  table's `emailDomain` rows and patches `institutionId` only when one matches, leaving
+  it unset otherwise (not an error). Split out from `profile()` because that callback
+  runs synchronously with no database access, while this one gets a real mutation ctx
+  and only ever fires for a brand-new credentials signup (never signIn). See AGENTS.md's
   "Signup email-domain matching" section for the full flow.
 - `users.ts` — `viewer` query (current user or null, including `role`/`institutionId`
   since it returns the full row), the auth-gate's first check; `updateName` — the one
@@ -853,10 +850,12 @@ than a parallel `adminProfiles` table. See AGENTS.md's Admin account section for
   See "Academic Year Progress" below for the screen this powers.
 - `studentProfiles.ts` — `getMyProfile` / `createProfile`, the onboarding-gate table.
   `createProfile`/`updateInstitutionalEmail`'s shared `requireInstitutionalEmailDomain`
-  helper resolves against the CALLER'S OWN `institutionId` (set at signup, see
-  `auth.ts` above) now, not just "whichever institution happens to be first in the
-  table" — falls back to `.first()` only for a legacy row that predates `institutionId`
-  being set on students. Also `updatePhoneNumber` / `updateInstitutionalEmail` /
+  helper resolves against the CALLER'S OWN `institutionId` (opportunistically set at
+  signup, see `auth.ts` above), not "whichever institution happens to be first in the
+  table" — and since signup is no longer domain-gated, `institutionId` is commonly
+  unset; in that case the helper is a no-op (any institutional email is accepted, there's
+  nothing known to validate against) rather than guessing an institution to enforce.
+  Also `updatePhoneNumber` / `updateInstitutionalEmail` /
   `updateDivision` (single-field edits, ownership-checked via a shared
   `requireMyProfile` helper) and
   `updateAcademicHierarchy` (the cascading edit — re-validates the whole Faculty→

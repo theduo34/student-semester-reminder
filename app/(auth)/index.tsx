@@ -195,7 +195,7 @@ function RegisterForm({ onLoginLinkPress }: { onLoginLinkPress: () => void }) {
           label="Email"
           value={email}
           onChangeText={setEmail}
-          placeholder="name@ktu.edu.gh"
+          placeholder="name@example.com"
           icon="envelope"
           isRequired
           keyboardType="email-address"
@@ -203,11 +203,6 @@ function RegisterForm({ onLoginLinkPress }: { onLoginLinkPress: () => void }) {
           autoComplete="email"
           textContentType="emailAddress"
         />
-        {/* Client-side hint only — the actual enforcement is server-side, in
-            convex/auth.ts's profile() callback (see convex/institutionDomains.ts). A
-            wrong-domain email is rejected on submit either way; this just avoids
-            surprising the student with an unexplained server error first. */}
-        <Text className="ml-1 text-xs text-muted">Use your institutional email address.</Text>
       </Animated.View>
 
       <Animated.View entering={stagger(2)}>

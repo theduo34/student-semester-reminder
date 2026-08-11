@@ -79,8 +79,9 @@ Dashboard tab's stat tiles instead of one round-trip per stat.
 Every user has a `role` (`"student" | "admin"`) on the auth-managed `users` table,
 extended (not replaced) per `@convex-dev/auth`'s own documented pattern — see
 `convex/schema.ts`. Every user also carries `institutionId` directly on their `users`
-row now — admins get it explicitly at creation (below), students get it resolved from
-their signup email's domain (see "Signup email-domain matching" below). Still optional
+row now — admins get it explicitly at creation (below), students get it opportunistically
+resolved from their signup email's domain, when it happens to match a seeded
+institution (see "Signup email-domain matching" below). Still optional
 in the schema only because Convex can't backfill a field onto rows that predate it (a
 demo/dev account created before this existed). No separate `adminProfiles` table: this
 is a still a small-institution-count MVP (see "Institution" below), so one extra column
@@ -90,9 +91,9 @@ in sync.
 
 **Students** get `role: "student"` automatically, set by the public register flow's own
 `profile()` callback (`convex/auth.ts`) — this is the only account-creation path that
-exists for students, unchanged from before. That same callback is also where their
-signup email's domain gets validated against a known institution — see "Signup
-email-domain matching" below.
+exists for students. Signup is not gated by email domain — any email can register; a
+follow-up callback opportunistically resolves `institutionId` when the domain happens
+to match a known institution — see "Signup email-domain matching" below.
 
 **Admins** are created exclusively by `convex/admins.ts`'s `createAdminAccount`, an
 internal function (dashboard/CLI-only, never client-callable) — see README.md's "Admin
@@ -157,45 +158,39 @@ each level's dependent-row delete guard).
 - **Institution** — one row today (Koforidua Technical University,
   `emailDomain: "ktu.edu.gh"`), but the schema and every query already support more than
   one — see "Signup email-domain matching" below for how a student's institution gets
-  resolved without ever being asked to pick one. Name and email domain are always read
-  from the `institutions` table, not hardcoded — `studentProfiles.createProfile`
-  validates the student's institutional email against their OWN resolved institution
+  opportunistically resolved without ever being asked to pick one, and without gating
+  who can sign up. Name and email domain are always read from the `institutions`
+  table, not hardcoded — `studentProfiles.createProfile` validates the student's
+  institutional email against their OWN resolved institution when one was resolved
   (not just "whichever institution happens to be first in the table" — see
   `convex/studentProfiles.ts#requireInstitutionalEmailDomain`), so onboarding a second
-  institution is a data change (a new `institutions` row + a domain added to the
-  allowlist below), not a code change to this validation itself.
+  institution is a data change (a new `institutions` row), not a code change to this
+  validation itself.
 
 #### Signup email-domain matching
 
-A student's institution is determined once, automatically, from their signup email's
-domain — there's no "pick your institution" step anywhere in the app. `convex/
-institutionDomains.ts` holds a small static array, `KNOWN_INSTITUTION_DOMAINS`
-(currently just `ktu.edu.gh`), checked in `convex/auth.ts`'s Password `profile()`
-callback: a signup (`flow === 'signUp'` only — see below) whose email doesn't end in
-one of these domains is rejected with a friendly error before an account is even
-created. This array is static rather than a live query against the `institutions`
-table for a real technical reason, not a style choice: Convex Auth's `profile()`
-callback must run synchronously with no database access (see that file's own comment),
-so it can only validate the domain shape, not look up a real `institutions._id`.
-Resolving the actual id happens one step later, in `convexAuth()`'s
-`afterUserCreatedOrUpdated` callback (`convex/auth.ts`) — a real mutation context, run
-right after the account is created — which re-matches the same domain against the
-`institutions` table and patches the new user's `institutionId`. Adding a second
-institution means updating BOTH: a new domain string in
-`KNOWN_INSTITUTION_DOMAINS` AND a matching `institutions` row (via `convex/seed.ts` or
-the admin app once it exists) — the two are kept in sync manually, by design, not
-derived from each other.
+Signup is open to any email domain — there's no "pick your institution" step anywhere
+in the app, and no allowlist that blocks account creation. `convex/auth.ts`'s Password
+`profile()` callback no longer inspects the email at all beyond passing it through; it
+only sets `role: 'student'`. Institution scoping is opportunistic, not a gate:
+`convexAuth()`'s `afterUserCreatedOrUpdated` callback (a real mutation context, run
+right after the account is created — `profile()` itself runs synchronously with no
+database access, so it can't do this lookup) matches the signup email's domain
+directly against the `institutions` table and patches the new user's `institutionId`
+only when a matching row exists. An email that doesn't match any seeded institution
+still creates a perfectly valid student account; `institutionId` is simply left unset,
+the same state every reader already treats as "no known institution" (see that field's
+own schema comment). Onboarding a new institution is therefore just seeding an
+`institutions` row (via `convex/seed.ts` or the admin app once it exists) — there's no
+second, separately-maintained domain list to keep in sync with it.
 
-**Login never re-checks the domain.** `profile()` runs on every auth flow (signUp,
+**Login never touches this at all.** `profile()` runs on every auth flow (signUp,
 signIn, password reset, ...), not just signUp — but Convex Auth's Password provider only
 ever *uses* the callback's return value on the signUp branch (passed to
 `createAccount`); the signIn branch (`retrieveAccount`) only reads `.email` off it and
-discards the rest. The domain check is explicitly gated to `flow === 'signUp'` for
-exactly this reason — a returning student's email was already validated at signup and
-must never be silently broken by a later-added institution, or re-validated on every
-login. `institutionId` on `users` (see schema.ts) is therefore set for every account
-now, both roles — students via this signup flow, admins explicitly via
-`convex/admins.ts#createAdminAccount` — not admin-only as it originally was.
+discards the rest. `institutionId` on `users` (see schema.ts) is set for every account,
+both roles — students opportunistically via this signup flow, admins explicitly via
+`convex/admins.ts#createAdminAccount`.
 - **Faculty → Department → Program** — a straight one-parent-each tree.
 - **academicClass** — a resolved Program + Level + Session triple (e.g. "HND Computer
   Science, Level 200, Regular"). Called `academicClass` everywhere — schema, types,

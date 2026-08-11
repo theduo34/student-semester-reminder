@@ -103,7 +103,7 @@ export default function ProfileSetupScreen() {
             setInstitutionalEmail(text);
             setEmailError(null);
           }}
-          placeholder="you@ktu.edu.gh"
+          placeholder="you@example.edu"
           icon="envelope"
           isRequired
           errorMessage={emailError ?? undefined}

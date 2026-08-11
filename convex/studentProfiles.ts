@@ -31,18 +31,20 @@ async function requireMyProfile(ctx: MutationCtx, userId: Id<'users'>) {
   return profile;
 }
 
-// Resolves against the CALLER's OWN institution (set at signup from their account
-// email's domain — see convex/auth.ts), not just "whichever institution happens to be
-// first in the table" — that was fine with exactly one institution seeded, but silently
-// wrong the moment a second one exists. Falls back to `.first()` only for a legacy row
-// created before institutionId was set on students (see schema.ts's comment on that
-// field) — never for a normal post-this-change account.
+// Resolves against the CALLER's OWN institution (opportunistically set at signup from
+// their account email's domain — see convex/auth.ts), never "whichever institution
+// happens to be first in the table." Signup is no longer gated to any particular
+// domain (see AGENTS.md's Signup email-domain matching section), so institutionId is
+// commonly unset — in that case there's no known institution to validate against, so
+// any institutional email is accepted as-is rather than forcing a guessed domain onto
+// a student whose signup wasn't tied to one.
 async function requireInstitutionalEmailDomain(ctx: MutationCtx, userId: Id<'users'>, institutionalEmail: string) {
   const user = await ctx.db.get(userId);
-  const institution = user?.institutionId
-    ? await ctx.db.get(user.institutionId)
-    : await ctx.db.query('institutions').first();
-  if (institution === null || institution === undefined) {
+  if (!user?.institutionId) {
+    return;
+  }
+  const institution = await ctx.db.get(user.institutionId);
+  if (institution === null) {
     throw new Error('No institution configured');
   }
   const expectedSuffix = `@${institution.emailDomain}`.toLowerCase();

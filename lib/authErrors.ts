@@ -7,8 +7,9 @@ import { ConvexError } from 'convex/values';
 // deployments (ConvexError is the only exception), so this matching only resolves to
 // a specific message during local/dev testing — the fallback below covers prod.
 export function getAuthErrorMessage(error: unknown): string {
-  // convex/auth.ts's own domain-validation rejection throws ConvexError specifically
-  // so this message survives the plain-Error redaction described above.
+  // A ConvexError (rather than a plain Error) survives the redaction described above —
+  // no current auth-flow code throws one, but this stays as the escape hatch for any
+  // future callback that needs a message to reach the client in production.
   if (error instanceof ConvexError && typeof error.data === 'string') {
     return error.data;
   }
