@@ -24,7 +24,6 @@ import type * as crons from "../crons.js";
 import type * as documentImport from "../documentImport.js";
 import type * as documentUploads from "../documentUploads.js";
 import type * as http from "../http.js";
-import type * as institutionDomains from "../institutionDomains.js";
 import type * as institutions from "../institutions.js";
 import type * as notificationPreferences from "../notificationPreferences.js";
 import type * as overdueSweep from "../overdueSweep.js";
@@ -61,7 +60,6 @@ declare const fullApi: ApiFromModules<{
   documentImport: typeof documentImport;
   documentUploads: typeof documentUploads;
   http: typeof http;
-  institutionDomains: typeof institutionDomains;
   institutions: typeof institutions;
   notificationPreferences: typeof notificationPreferences;
   overdueSweep: typeof overdueSweep;
