@@ -7,6 +7,7 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 import { useCSSVariable } from 'uniwind';
 
 import { ActivityCard } from '@/components/shared/ActivityCard';
+import { ClassSessionRow } from '@/components/shared/ClassSessionRow';
 import { HomeHeader } from '@/components/features/dashboard/HomeHeader';
 import { ProgressCard } from '@/components/shared/ProgressCard';
 import { Button } from '@/components/ui/Button';
@@ -14,6 +15,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Screen } from '@/components/ui/Screen';
 import { api } from '@/convex/_generated/api';
 import { mapCourseActivity, mapPersonalReminder, mapSemesterActivity, UnifiedActivity } from '@/lib/activityMapping';
+import { DAY_NAMES, isWithinSemester, ScheduleEntry } from '@/lib/courseSchedule';
 import { toDateKey } from '@/lib/dateKey';
 import { computeSemesterProgress } from '@/lib/semesterProgress';
 
@@ -34,6 +36,7 @@ function startOfLocalDay(ms: number): number {
 const OVERDUE_LIMIT = 1;
 const TODAY_LIMIT = 3;
 const UPCOMING_LIMIT = 2;
+const CLASSES_LIMIT = 3;
 
 // Home renders course activities, personal reminders, and semester activities merged
 // into three time-derived sections — see AGENTS.md's "Home section limits" note for
@@ -56,6 +59,10 @@ export default function HomeScreen() {
     api.alerts.listBySemester,
     semester ? { semesterId: semester._id } : 'skip',
   );
+  const scheduleData = useQuery(
+    api.courseSections.listMyScheduleForSemester,
+    semester ? { semesterId: semester._id } : 'skip',
+  );
 
   // Recomputed on focus (and every minute while focused) so "Today"/"Upcoming" don't
   // stay stale if the student leaves the app open past midnight — a plain Date.now()
@@ -70,7 +77,20 @@ export default function HomeScreen() {
   );
 
   const activitiesLoading =
-    courseActivitiesData === undefined || personalRemindersData === undefined || semesterActivitiesData === undefined;
+    courseActivitiesData === undefined ||
+    personalRemindersData === undefined ||
+    semesterActivitiesData === undefined ||
+    scheduleData === undefined;
+
+  // Today's recurring class sessions — unlike Calendar's version of this, Home only
+  // ever cares about today (there's no day picker here), so this is just "does
+  // today's day-of-week appear in a section's own scheduleDays," gated to the
+  // semester's date range the same way Calendar's does.
+  const todaysClasses: ScheduleEntry[] = useMemo(() => {
+    if (!isWithinSemester(startOfLocalDay(now), semester)) return [];
+    const dayOfWeek = DAY_NAMES[new Date(now).getDay()];
+    return (scheduleData ?? []).filter((entry) => entry.scheduleDays.includes(dayOfWeek));
+  }, [scheduleData, semester, now]);
 
   const allActivities: UnifiedActivity[] = useMemo(() => {
     const fromCourseActivities = (courseActivitiesData ?? []).map(mapCourseActivity);
@@ -113,7 +133,8 @@ export default function HomeScreen() {
   }, [allActivities, now]);
 
   const isLoading = viewer === undefined || semester === undefined || activitiesLoading;
-  const isEverythingEmpty = overdue.length === 0 && todaySchedule.length === 0 && upcoming.length === 0;
+  const isEverythingEmpty =
+    overdue.length === 0 && todaySchedule.length === 0 && upcoming.length === 0 && todaysClasses.length === 0;
 
   const firstName = viewer?.name?.split(' ')[0] ?? 'Student';
   const todayKey = toDateKey(now);
@@ -146,6 +167,18 @@ export default function HomeScreen() {
             </Pressable>
           ) : null}
 
+          {todaysClasses.length > 0 ? (
+            <Section
+              title="Classes today"
+              count={todaysClasses.length}
+              limit={CLASSES_LIMIT}
+              items={todaysClasses}
+              emptyText={null}
+              onViewAll={() => router.push({ pathname: '/calendar', params: { view: 'month', date: todayKey } })}
+              renderItem={(session) => <ClassSessionRow key={session.courseId} session={session} />}
+            />
+          ) : null}
+
           {isEverythingEmpty ? (
             <EmptyState onAddActivity={goToAddActivity} />
           ) : (
@@ -158,8 +191,21 @@ export default function HomeScreen() {
                   limit={OVERDUE_LIMIT}
                   items={overdue}
                   emptyText={null}
-                  onPressActivity={goToActivity}
                   onViewAll={() => router.push({ pathname: '/calendar', params: { view: 'month' } })}
+                  renderItem={(activity) => (
+                    <ActivityCard
+                      key={activity.id}
+                      kind={activity.kind}
+                      title={activity.title}
+                      priority={activity.priority}
+                      activityType={activity.activityType}
+                      dueDate={activity.dueDate}
+                      displayTime={activity.displayTime}
+                      endTime={activity.endTime}
+                      isCompleted={activity.isCompleted}
+                      onPress={() => goToActivity(activity)}
+                    />
+                  )}
                 />
               ) : null}
 
@@ -169,8 +215,21 @@ export default function HomeScreen() {
                 limit={TODAY_LIMIT}
                 items={todaySchedule}
                 emptyText="Nothing on your plate today."
-                onPressActivity={goToActivity}
                 onViewAll={() => router.push({ pathname: '/calendar', params: { view: 'month', date: todayKey } })}
+                renderItem={(activity) => (
+                  <ActivityCard
+                    key={activity.id}
+                    kind={activity.kind}
+                    title={activity.title}
+                    priority={activity.priority}
+                    activityType={activity.activityType}
+                    dueDate={activity.dueDate}
+                    displayTime={activity.displayTime}
+                    endTime={activity.endTime}
+                    isCompleted={activity.isCompleted}
+                    onPress={() => goToActivity(activity)}
+                  />
+                )}
               />
 
               <Section
@@ -179,8 +238,21 @@ export default function HomeScreen() {
                 limit={UPCOMING_LIMIT}
                 items={upcoming}
                 emptyText="No activities coming up this week."
-                onPressActivity={goToActivity}
                 onViewAll={() => router.push({ pathname: '/calendar', params: { view: 'week' } })}
+                renderItem={(activity) => (
+                  <ActivityCard
+                    key={activity.id}
+                    kind={activity.kind}
+                    title={activity.title}
+                    priority={activity.priority}
+                    activityType={activity.activityType}
+                    dueDate={activity.dueDate}
+                    displayTime={activity.displayTime}
+                    endTime={activity.endTime}
+                    isCompleted={activity.isCompleted}
+                    onPress={() => goToActivity(activity)}
+                  />
+                )}
               />
             </>
           )}
@@ -190,24 +262,30 @@ export default function HomeScreen() {
   );
 }
 
-function Section({
+// Generic over item type so the same capped-list/"View more" chrome serves both
+// UnifiedActivity sections (rendered as ActivityCard) and the Classes section
+// (rendered as ClassSessionRow) without duplicating the count/limit/view-all
+// bookkeeping — the two kinds of row don't share a shape (a class session has no
+// priority/completion), which is exactly why rendering is a caller-supplied function
+// instead of this component assuming ActivityCard.
+function Section<T>({
   title,
   count,
   limit,
   items,
   emptyText,
   isOverdue,
-  onPressActivity,
   onViewAll,
+  renderItem,
 }: {
   title: string;
   count: number;
   limit: number;
-  items: UnifiedActivity[];
+  items: T[];
   emptyText: string | null;
   isOverdue?: boolean;
-  onPressActivity: (activity: UnifiedActivity) => void;
   onViewAll: () => void;
+  renderItem: (item: T) => React.ReactNode;
 }) {
   const [accent] = useCSSVariable(['--accent']) as [string];
   const hasMore = count > limit;
@@ -230,22 +308,7 @@ function Section({
       {visibleItems.length === 0 && emptyText ? (
         <Text className="text-sm text-muted">{emptyText}</Text>
       ) : (
-        <View className="gap-2">
-          {visibleItems.map((activity) => (
-            <ActivityCard
-              key={activity.id}
-              kind={activity.kind}
-              title={activity.title}
-              priority={activity.priority}
-              activityType={activity.activityType}
-              dueDate={activity.dueDate}
-              displayTime={activity.displayTime}
-              endTime={activity.endTime}
-              isCompleted={activity.isCompleted}
-              onPress={() => onPressActivity(activity)}
-            />
-          ))}
-        </View>
+        <View className="gap-2">{visibleItems.map(renderItem)}</View>
       )}
     </View>
   );
