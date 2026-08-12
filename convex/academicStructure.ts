@@ -11,6 +11,104 @@ import { sessionValidator } from './schema';
 // Setup/cascading edits), but every write below is gated by requireAdmin (see
 // convex/adminAuth.ts). See AGENTS.md for the full model.
 
+// --- Cascade-delete helpers -----------------------------------------------------
+// Deleting anywhere in this hierarchy is a real cascade, not the "block until admin
+// clears it first" pattern this file used before (kept only for updateAcademicClass,
+// since silently reassigning existing students/courses to a different level/session
+// identity is a different kind of risk than deleting them outright) — confirmed
+// deliberately: this can delete real studentProfiles, not just empty structure. Each
+// remove mutation's own ConfirmDialog says so explicitly. Bottom-up: a course's own
+// sections/activities/completions go before the course, a class's courses/divisions/
+// students go before the class, and so on up to whichever level admin actually
+// clicked delete on.
+
+async function cascadeDeleteCourse(ctx: MutationCtx, courseId: Id<'courses'>) {
+  const [sections, activities, reminders] = await Promise.all([
+    ctx.db
+      .query('courseSections')
+      .withIndex('by_courseId', (q) => q.eq('courseId', courseId))
+      .collect(),
+    ctx.db
+      .query('courseActivities')
+      .withIndex('by_courseId', (q) => q.eq('courseId', courseId))
+      .collect(),
+    // personalReminders has no index on courseId — a full scan, same "flagged not
+    // fixed at this app's demo scale" posture as every other full scan in this file.
+    ctx.db.query('personalReminders').collect(),
+  ]);
+  await Promise.all(sections.map((section) => ctx.db.delete(section._id)));
+  for (const activity of activities) {
+    const completions = await ctx.db
+      .query('courseActivityCompletions')
+      .withIndex('by_courseActivityId', (q) => q.eq('courseActivityId', activity._id))
+      .collect();
+    await Promise.all(completions.map((completion) => ctx.db.delete(completion._id)));
+    await ctx.db.delete(activity._id);
+  }
+  // Null out, never delete — a personal reminder is the student's own content, losing
+  // which course it was tied to is a small, acceptable side effect; deleting the
+  // reminder itself as a side effect of an admin hierarchy edit would not be. Same
+  // pattern studentProfiles.ts#updateAcademicHierarchy already uses when a student's
+  // own class change orphans a reminder's course link.
+  await Promise.all(
+    reminders
+      .filter((reminder) => reminder.courseId === courseId)
+      .map((reminder) => ctx.db.patch(reminder._id, { courseId: undefined })),
+  );
+  await ctx.db.delete(courseId);
+}
+
+async function cascadeDeleteAcademicClass(ctx: MutationCtx, academicClassId: Id<'academicClasses'>) {
+  const [profiles, courses, divisions] = await Promise.all([
+    ctx.db
+      .query('studentProfiles')
+      .withIndex('by_academicClassId', (q) => q.eq('academicClassId', academicClassId))
+      .collect(),
+    ctx.db
+      .query('courses')
+      .withIndex('by_academicClassId', (q) => q.eq('academicClassId', academicClassId))
+      .collect(),
+    ctx.db
+      .query('divisions')
+      .withIndex('by_academicClassId', (q) => q.eq('academicClassId', academicClassId))
+      .collect(),
+  ]);
+  // The class itself is gone, so a student's profile in it has nowhere left to point —
+  // deleted outright (not nulled), which is what sends them back to onboarding next
+  // time they open the app (see AGENTS.md: profile absence IS the needs-profile-setup
+  // gate state). Their own personalReminders/alerts/pushTokens are untouched — those
+  // are the student's own account data, independent of academic placement, not
+  // something an admin hierarchy edit should reach into.
+  await Promise.all(profiles.map((profile) => ctx.db.delete(profile._id)));
+  for (const course of courses) {
+    await cascadeDeleteCourse(ctx, course._id);
+  }
+  await Promise.all(divisions.map((division) => ctx.db.delete(division._id)));
+  await ctx.db.delete(academicClassId);
+}
+
+async function cascadeDeleteProgram(ctx: MutationCtx, programId: Id<'programs'>) {
+  const classes = await ctx.db
+    .query('academicClasses')
+    .withIndex('by_program_level_session', (q) => q.eq('programId', programId))
+    .collect();
+  for (const academicClass of classes) {
+    await cascadeDeleteAcademicClass(ctx, academicClass._id);
+  }
+  await ctx.db.delete(programId);
+}
+
+async function cascadeDeleteDepartment(ctx: MutationCtx, departmentId: Id<'departments'>) {
+  const programs = await ctx.db
+    .query('programs')
+    .withIndex('by_departmentId', (q) => q.eq('departmentId', departmentId))
+    .collect();
+  for (const program of programs) {
+    await cascadeDeleteProgram(ctx, program._id);
+  }
+  await ctx.db.delete(departmentId);
+}
+
 export const listFaculties = query({
   args: {},
   handler: async (ctx) => {
@@ -57,6 +155,16 @@ export const updateFaculty = mutation({
     if (faculty === null) {
       throw new Error('Faculty not found');
     }
+    // createFaculty already rejects a duplicate name; a rename has to enforce the
+    // exact same rule or it becomes the one way around it (create a differently-named
+    // faculty, then rename it to collide with an existing one).
+    const existing = await ctx.db
+      .query('faculties')
+      .withIndex('by_institutionId', (q) => q.eq('institutionId', faculty.institutionId))
+      .collect();
+    if (existing.some((other) => other._id !== facultyId && other.name.toLowerCase() === trimmed.toLowerCase())) {
+      throw new Error('A faculty with this name already exists');
+    }
     await ctx.db.patch(facultyId, { name: trimmed });
   },
 });
@@ -65,12 +173,12 @@ export const removeFaculty = mutation({
   args: { facultyId: v.id('faculties') },
   handler: async (ctx, { facultyId }) => {
     await requireAdmin(ctx);
-    const hasDepartments = await ctx.db
+    const departments = await ctx.db
       .query('departments')
       .withIndex('by_facultyId', (q) => q.eq('facultyId', facultyId))
-      .first();
-    if (hasDepartments !== null) {
-      throw new Error('Cannot delete a faculty that still has departments');
+      .collect();
+    for (const department of departments) {
+      await cascadeDeleteDepartment(ctx, department._id);
     }
     await ctx.db.delete(facultyId);
   },
@@ -121,6 +229,15 @@ export const updateDepartment = mutation({
     if (department === null) {
       throw new Error('Department not found');
     }
+    // Same "rename can't be a backdoor around the duplicate check createDepartment
+    // already enforces" reasoning as updateFaculty above.
+    const existing = await ctx.db
+      .query('departments')
+      .withIndex('by_facultyId', (q) => q.eq('facultyId', department.facultyId))
+      .collect();
+    if (existing.some((other) => other._id !== departmentId && other.name.toLowerCase() === trimmed.toLowerCase())) {
+      throw new Error('A department with this name already exists in this faculty');
+    }
     await ctx.db.patch(departmentId, { name: trimmed });
   },
 });
@@ -129,14 +246,7 @@ export const removeDepartment = mutation({
   args: { departmentId: v.id('departments') },
   handler: async (ctx, { departmentId }) => {
     await requireAdmin(ctx);
-    const hasPrograms = await ctx.db
-      .query('programs')
-      .withIndex('by_departmentId', (q) => q.eq('departmentId', departmentId))
-      .first();
-    if (hasPrograms !== null) {
-      throw new Error('Cannot delete a department that still has programs');
-    }
-    await ctx.db.delete(departmentId);
+    await cascadeDeleteDepartment(ctx, departmentId);
   },
 });
 
@@ -185,6 +295,15 @@ export const updateProgram = mutation({
     if (program === null) {
       throw new Error('Program not found');
     }
+    // Same "rename can't be a backdoor around the duplicate check createProgram
+    // already enforces" reasoning as updateFaculty above.
+    const existing = await ctx.db
+      .query('programs')
+      .withIndex('by_departmentId', (q) => q.eq('departmentId', program.departmentId))
+      .collect();
+    if (existing.some((other) => other._id !== programId && other.name.toLowerCase() === trimmed.toLowerCase())) {
+      throw new Error('A program with this name already exists in this department');
+    }
     await ctx.db.patch(programId, { name: trimmed });
   },
 });
@@ -193,14 +312,7 @@ export const removeProgram = mutation({
   args: { programId: v.id('programs') },
   handler: async (ctx, { programId }) => {
     await requireAdmin(ctx);
-    const hasClasses = await ctx.db
-      .query('academicClasses')
-      .withIndex('by_program_level_session', (q) => q.eq('programId', programId))
-      .first();
-    if (hasClasses !== null) {
-      throw new Error('Cannot delete a program that still has academic classes');
-    }
-    await ctx.db.delete(programId);
+    await cascadeDeleteProgram(ctx, programId);
   },
 });
 
@@ -336,10 +448,7 @@ export const removeAcademicClass = mutation({
     if (academicClass === null) {
       throw new Error('Class not found');
     }
-    if (await academicClassHasDependents(ctx, academicClassId)) {
-      throw new Error('Cannot delete a class that still has divisions, courses, or students');
-    }
-    await ctx.db.delete(academicClassId);
+    await cascadeDeleteAcademicClass(ctx, academicClassId);
   },
 });
 
@@ -440,6 +549,15 @@ export const updateDivision = mutation({
     if (division === null) {
       throw new Error('Division not found');
     }
+    // Same "rename can't be a backdoor around the duplicate check createDivision
+    // already enforces" reasoning as updateFaculty above.
+    const existing = await ctx.db
+      .query('divisions')
+      .withIndex('by_academicClassId', (q) => q.eq('academicClassId', division.academicClassId))
+      .collect();
+    if (existing.some((other) => other._id !== divisionId && other.label.toLowerCase() === trimmed.toLowerCase())) {
+      throw new Error('A division with this label already exists in this class');
+    }
     await ctx.db.patch(divisionId, { label: trimmed });
   },
 });
@@ -449,17 +567,24 @@ export const removeDivision = mutation({
   handler: async (ctx, { divisionId }) => {
     await requireAdmin(ctx);
     // courseSections/studentProfiles have no index on divisionId — full-table scans,
-    // same posture as academicClassHasDependents above.
+    // same posture as every other full scan in this file. A division is lighter-weight
+    // than the rest of the hierarchy above it (a student's subdivision, not their core
+    // academic identity), so removing it deletes the sections scheduled specifically
+    // for it but only nulls out — never deletes — a profile's divisionId (the student
+    // falls back to the class's undivided section, same as a student who was never
+    // assigned one; see courseSections.ts#getForStudentCourse).
     const [sections, profiles] = await Promise.all([
       ctx.db.query('courseSections').collect(),
       ctx.db.query('studentProfiles').collect(),
     ]);
-    const inUse =
-      sections.some((section) => section.divisionId === divisionId) ||
-      profiles.some((profile) => profile.divisionId === divisionId);
-    if (inUse) {
-      throw new Error('Cannot delete a division that still has course sections or students');
-    }
+    await Promise.all(
+      sections.filter((section) => section.divisionId === divisionId).map((section) => ctx.db.delete(section._id)),
+    );
+    await Promise.all(
+      profiles
+        .filter((profile) => profile.divisionId === divisionId)
+        .map((profile) => ctx.db.patch(profile._id, { divisionId: undefined })),
+    );
     await ctx.db.delete(divisionId);
   },
 });
