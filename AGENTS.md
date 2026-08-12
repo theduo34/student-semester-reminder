@@ -338,13 +338,22 @@ central write path for the row itself:
   approximation until local scheduling is built as its own pass. Even once that pass
   happens, this kind stays purely local — pushing it too would double-fire alongside
   the local notification for the same trigger.
-- **`NEW_EVENT`** — a semesterActivities row created after the student's
-  `studentProfiles.lastSeenAlertsAt`. A student's first-ever sync baselines this
+- **`NEW_EVENT`** — a semesterActivities OR courseActivities row created after the
+  student's `studentProfiles.lastSeenAlertsAt` (the latter covers a published exam/
+  assignment/quiz/project — this is what makes an admin's exam-timetable import show up
+  on the student's Alerts screen, not just in the course activity lists themselves; the
+  courseActivities query it reads is already scoped to the student's own class, so this
+  stays correctly program-scoped for free). A student's first-ever sync baselines this
   timestamp without alerting on the pre-existing catalogue, rather than dumping every
-  institutional event that existed before they signed up into their feed. Also pushed
-  in real time now (`convex/pushDelivery.ts#notifyNewEvent`, scheduled the moment a
-  semesterActivity is inserted) — `useAlertsSync`'s own detection stays as a fallback,
-  not removed.
+  institutional event/activity that existed before they signed up into their feed.
+  SemesterActivities are also pushed in real time (`convex/pushDelivery.ts
+  #notifyNewEvent`, scheduled the moment a semesterActivity is inserted) —
+  `useAlertsSync`'s own detection stays as a fallback there, not removed. CourseActivity
+  publishes (both `create` and the bulk/import paths) have no server-side push
+  counterpart yet — `useAlertsSync`'s client-side detection is the only path for this
+  half of `NEW_EVENT` today, same "no notification burst for bulk publishes" posture the
+  bulk mutations themselves already document (`courseActivities.ts#createBulk`/
+  `importExamTimetable`).
 - **`OVERDUE`** — a courseActivity/personalReminder's `dueDate` has passed while not
   completed. Institutional events (semesterActivities) never generate this kind — they
   have no completion concept to be "overdue" against. Also detected server-side now, by
