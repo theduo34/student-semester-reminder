@@ -81,6 +81,13 @@ export default defineSchema({
     // convex/academicYears.ts), it's still fully usable everywhere else (getActive,
     // course/activity scoping, ...).
     academicYearId: v.optional(v.id('academicYears')),
+    // 'auto' (or unset — every pre-existing row predates this field): eligible to be
+    // reassigned by the hourly active-semester sync (semesters.ts#syncActiveSemester)
+    // whenever `now` moves outside this row's own [startDate, endDate]. 'manual':
+    // admin explicitly pinned this semester active via setActiveSemester — the sync
+    // leaves it alone regardless of dates, until admin picks a different one. Only
+    // meaningful on whichever row currently has isActive: true.
+    activeMode: v.optional(v.union(v.literal('auto'), v.literal('manual'))),
   })
     .index('by_isActive', ['isActive'])
     .index('by_academicYearId', ['academicYearId']),
@@ -168,6 +175,12 @@ export default defineSchema({
     scheduleDays: v.array(v.string()),
     scheduleTime: v.string(),
     venue: v.optional(v.string()),
+    // Optional — populated by the timetable-import path (documentImport.ts's
+    // parseCourseTimetable + courses.ts's importCourseTimetable); a section created
+    // through the manual "Add course" path may not set it. Additive field, not a
+    // rename — same posture as every other optional field added after its table
+    // already had rows (see e.g. semesters.academicYearId's own comment).
+    lecturer: v.optional(v.string()),
   }).index('by_courseId', ['courseId']),
 
   // Admin-owned and shared: ONE row per activity, published once regardless of how
@@ -201,7 +214,31 @@ export default defineSchema({
     // one-off cleanup mutation, then removed again. Never write to these going forward.
     studentId: v.optional(v.id('users')),
     status: v.optional(activityStatusValidator),
-  }).index('by_courseId', ['courseId']),
+    // Denormalized from courseId's own course — a courseActivity has no natural
+    // "every activity in this semester" index otherwise (courseId -> course ->
+    // semesterId is a two-hop join Convex can't paginate through directly). Optional
+    // because it was added after rows already existed — same posture as every other
+    // backfill-gap field in this schema (see e.g. semesters.academicYearId's own
+    // comment); rows that predate it simply won't surface in semester-scoped admin
+    // reads.
+    semesterId: v.optional(v.id('semesters')),
+    // Which 'exams'-kind activityCategories row this EXAM activity was published
+    // under (see that table's own comment) — set by
+    // courseActivities.ts#importExamTimetable, the only writer of EXAM-type rows.
+    // Non-EXAM activityTypes never set this; an admin-created category only ever
+    // holds one kind of thing. Optional for the same backfill-gap reason as
+    // semesterId above.
+    categoryId: v.optional(v.id('activityCategories')),
+  })
+    .index('by_courseId', ['courseId'])
+    .index('by_categoryId', ['categoryId'])
+    .index('by_semesterId', ['semesterId'])
+    // Lets "uncategorized EXAM rows in this one semester" be a real indexed,
+    // paginated query (Convex indexes accept `undefined` as a real key component —
+    // matches rows where categoryId was never set — see courses.ts#importExamTimetable
+    // and the Publish page's Uncategorized view) instead of a full-table scan filtered
+    // in memory.
+    .index('by_semesterId_and_categoryId', ['semesterId', 'categoryId']),
 
   // One row per (courseActivity, student) — created/patched only when a student
   // actually marks something complete (courseActivities.ts#updateStatus). Absence of a
@@ -216,6 +253,35 @@ export default defineSchema({
     .index('by_studentId', ['studentId'])
     .index('by_courseActivityId', ['courseActivityId']),
 
+  // Admin-created buckets for organizing what gets published under a semester on the
+  // admin Publish page — every category lives under exactly one semester (a new
+  // semester starts with none, admin creates what it needs), chosen from the
+  // Publish page's Year/Semester pickers.
+  //
+  // 'kind' is fixed at creation and never changes after (enforced in
+  // activityCategories.ts#updateCategory, which simply doesn't accept it as a
+  // patchable field): 'general' categories hold plain title/date/description rows
+  // (semesterActivities, tagged by categoryId) — Academic Calendar is the
+  // motivating example, but admin can create as many as they want, named however.
+  // 'exams' categories hold EXAM-type courseActivities instead (tagged by
+  // categoryId too, see that table's own comment) — these need real course-code
+  // matching against courses/courseSections (Teaching Timetable), which a plain
+  // title/date/description row can't hold, so they're a structurally different kind
+  // of category rather than a flag on the same data. Teaching Timetable itself still
+  // isn't a category at all — it creates whole courses/classes, not just activities,
+  // and stays on its own Courses page.
+  activityCategories: defineTable({
+    semesterId: v.id('semesters'),
+    name: v.string(),
+    description: v.optional(v.string()),
+    // Optional only so any category row created before this field existed (this same
+    // session, before kind was added) doesn't fail schema validation — every category
+    // created going forward always has one (createCategory requires it), and every
+    // reader treats an unset kind as 'general', the type every category was before
+    // 'exams' existed.
+    kind: v.optional(v.union(v.literal('general'), v.literal('exams'))),
+  }).index('by_semesterId', ['semesterId']),
+
   // Admin-published institutional events (registration, exam periods, campus events).
   // Always CRITICAL priority and non-dismissible. Read-only from this app. Institution-
   // wide, not scoped to an academicClass — confirmed intentional.
@@ -224,7 +290,19 @@ export default defineSchema({
     title: v.string(),
     description: v.optional(v.string()),
     date: v.number(),
-  }).index('by_semesterId', ['semesterId']),
+    // Optional — added after this table already had rows (the pre-category-system
+    // Academic Calendar import), same backfill-gap posture as every other optional
+    // field added later in this schema. A row with no category simply doesn't appear
+    // under any category's own listing (convex/semesterActivities.ts
+    // #listActivitiesByCategoryPaginated) — it still shows on the semester-wide views
+    // that read by semesterId directly (the semester detail page).
+    categoryId: v.optional(v.id('activityCategories')),
+  })
+    .index('by_semesterId', ['semesterId'])
+    .index('by_categoryId', ['categoryId'])
+    // Same "uncategorized rows in this one semester, as a real indexed paginated
+    // query" reasoning as courseActivities' own by_semesterId_and_categoryId index.
+    .index('by_semesterId_and_categoryId', ['semesterId', 'categoryId']),
 
   // Owned by this app — the student's primary creative surface. This is a REMINDER
   // platform, not a task manager: students never create courseActivities (admin owns
