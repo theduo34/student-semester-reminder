@@ -8,9 +8,11 @@ import { useCSSVariable } from 'uniwind';
 
 import { ActivityCard } from '@/components/shared/ActivityCard';
 import { AppTopBar } from '@/components/shared/AppTopBar';
+import { ClassSessionRow } from '@/components/shared/ClassSessionRow';
 import { Screen } from '@/components/ui/Screen';
 import { api } from '@/convex/_generated/api';
 import { toDateKey } from '@/lib/dateKey';
+import { DAY_NAMES, isWithinSemester, ScheduleEntry } from '@/lib/courseSchedule';
 
 // react-native-calendars doesn't re-export its Theme/MarkedDates types from the package
 // root (only from a deep `src/types` import) — declared inline here instead of reaching
@@ -191,6 +193,10 @@ export default function CalendarScreen() {
     api.courses.listMyCourses,
     semester ? { semesterId: semester._id } : 'skip',
   );
+  const scheduleData = useQuery(
+    api.courseSections.listMyScheduleForSemester,
+    semester ? { semesterId: semester._id } : 'skip',
+  );
 
   const isLoading =
     viewer === undefined ||
@@ -198,7 +204,8 @@ export default function CalendarScreen() {
     courseActivitiesData === undefined ||
     personalRemindersData === undefined ||
     semesterActivitiesData === undefined ||
-    coursesData === undefined;
+    coursesData === undefined ||
+    scheduleData === undefined;
 
   const coursesById = useMemo(
     () => new Map((coursesData ?? []).map((course) => [course._id, course])),
@@ -390,6 +397,18 @@ export default function CalendarScreen() {
   });
   const selectedDayActivities = activitiesByDay.get(selectedDate) ?? [];
 
+  // Recurring class sessions for whichever day is selected — a course section repeats
+  // weekly, so this isn't a lookup by date the way activitiesByDay is; it's "does
+  // today's day-of-week appear in this section's own scheduleDays," gated to the
+  // semester's own date range so a Saturday before term starts (or after it ends)
+  // doesn't show a class that isn't actually happening.
+  const selectedDayOfWeek = DAY_NAMES[new Date(`${selectedDate}T00:00:00`).getDay()];
+  const selectedDateMs = new Date(`${selectedDate}T00:00:00`).getTime();
+  const withinSemester = isWithinSemester(selectedDateMs, semester);
+  const selectedDayClasses: ScheduleEntry[] = withinSemester
+    ? (scheduleData ?? []).filter((entry) => entry.scheduleDays.includes(selectedDayOfWeek))
+    : [];
+
   return (
     <Screen header={<AppTopBar title="Calendar" right={<ViewToggle value={viewMode} onChange={setViewMode} />} />}>
       <ScrollView className="flex-1" showsVerticalScrollIndicator={false} contentContainerClassName="gap-6 pb-10 pt-4">
@@ -432,6 +451,15 @@ export default function CalendarScreen() {
                   </View>
                 ) : null}
               </View>
+
+              {selectedDayClasses.length > 0 ? (
+                <View className="gap-2">
+                  <Text className="text-xs font-semibold uppercase text-muted">Classes</Text>
+                  {selectedDayClasses.map((session) => (
+                    <ClassSessionRow key={session.courseId} session={session} />
+                  ))}
+                </View>
+              ) : null}
 
               {selectedDayActivities.length === 0 ? (
                 <View className="items-center justify-center rounded-md border border-dashed border-border py-8">
