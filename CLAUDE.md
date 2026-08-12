@@ -309,24 +309,42 @@ priority order Overdue > Today > Upcoming: an item due today whose time has alre
 passed counts as Overdue, not both.
 
 **Section limits** (display rules, not arbitrary — matches the wireframe): Overdue
-shows max **1**, Today's schedule max **3**, Upcoming this week max **2**. Past the
-limit, the section header's count number is replaced by a "View all →" link
-(`text-accent`) that deep-links to Calendar with query params seeding its initial
-state — see the Calendar section below:
+shows max **1**, Today's schedule max **3**, Upcoming this week max **2**, Classes
+today max **3** (`CLASSES_LIMIT`). Past the limit, the section header's count number is
+replaced by a "View more →" link (`text-accent`) that deep-links to Calendar with query
+params seeding its initial state — see the Calendar section below:
 
 - Overdue → `{ view: 'month' }` (no `date` — the student browses to find it)
 - Today's schedule → `{ view: 'month', date: todayKey }`
 - Upcoming this week → `{ view: 'week' }`
+- Classes today → `{ view: 'month', date: todayKey }`
 
-**Section empty states** — Overdue is the only section that can disappear entirely
-(no header, nothing rendered) when there's nothing overdue; Today's schedule and
-Upcoming this week always render their header, even when empty, with a one-line muted
-placeholder ("Nothing on your plate today." / "No activities coming up this week.")
-instead of the section vanishing — so the student can tell the app checked, not that it
-silently failed to load. Only when all three are empty does the screen swap to
+**Classes today** — a fourth section, above Overdue, sourced from
+`courseSections.listMyScheduleForSemester` (see CLAUDE.md's courseSections.ts entry)
+rather than the three `UnifiedActivity` sources the others share: recurring class
+sessions have no priority/completion/due-date concept, so they're filtered to the
+current day-of-week and rendered via `ClassSessionRow` (`components/shared/
+ClassSessionRow.tsx`), not `ActivityCard`. `Section` itself is generic
+(`Section<T>({ items: T[], renderItem: (item: T) => ReactNode, ... })`) specifically so
+this one section can reuse the same count/limit/"View more" chrome as the other three
+without forcing class sessions into `ActivityCard`'s shape. `todaysClasses` is computed
+via `isWithinSemester` (`lib/courseSchedule.ts`) first — a Saturday before term starts
+or after it ends shows no classes, even if a course section's `scheduleDays` includes
+it — then filtered to `DAY_NAMES[new Date(now).getDay()]`. Hidden entirely (no header)
+when empty, same treatment as Overdue.
+
+**Section empty states** — Overdue and Classes today are the two sections that can
+disappear entirely (no header, nothing rendered) when there's nothing to show; Today's
+schedule and Upcoming this week always render their header, even when empty, with a
+one-line muted placeholder ("Nothing on your plate today." / "No activities coming up
+this week.") instead of the section vanishing — so the student can tell the app
+checked, not that it silently failed to load. Only when Overdue, Today's schedule,
+Upcoming this week, AND Classes today are all empty does the screen swap to
 Wireframe_11's full-screen "You're all caught up" state (confetti icon, `Add your first
 activity` button pushing `/add-activity` — a second entry point to the same modal the
-FAB opens).
+FAB opens) — `isEverythingEmpty` checks all four, not just the original three, so a day
+with classes but no activities shows just the Classes section, never the empty state on
+top of it.
 
 `HomeHeader` renders as soon as `viewer` resolves, independent of the three activity
 queries — Screen's `header` slot isn't gated behind `isLoading`, so the header (and its
@@ -559,7 +577,11 @@ not a dead end). Shown only when `listMine` returns zero rows.
 ### Push architecture (Android + iOS, cross-platform code)
 
 Real Expo push covers exactly two of the Alerts feed's three kinds — `NEW_EVENT` and
-`OVERDUE`. `REMINDER_FIRED` stays purely local (an on-device `expo-notifications`
+`OVERDUE` — though `NEW_EVENT` only pushes for its semesterActivities half
+(`notifyNewEvent`, triggered on insert); the courseActivities half (an exam/assignment/
+quiz/project publish) has no server-side push counterpart yet and only ever produces an
+Alerts-tab row via `useAlertsSync`'s client-side detection — see AGENTS.md's Alerts feed
+section. `REMINDER_FIRED` stays purely local (an on-device `expo-notifications`
 schedule — not yet actually implemented, see the Alerts feed section's flagged gap
 above) and never goes through this pipeline; pushing it too would double-fire
 alongside the eventual local notification for the same trigger.
@@ -865,7 +887,8 @@ than a parallel `adminProfiles` table. See AGENTS.md's Admin account section for
   that no longer belongs to the new academicClass. See AGENTS.md's Profile editing
   section for the full picture). `updateLastSeenAlertsAt` is unrelated to profile
   editing — written only by `hooks/useAlertsSync.ts` after each NEW_EVENT sync pass, so
-  the next pass only checks semesterActivities published after that point.
+  the next pass only checks semesterActivities/courseActivities published after that
+  point.
 - `courses.ts` (`listMyCourses`), `courseSections.ts` — scoped to the caller's
   `studentProfile.academicClassId`, resolved server-side from their auth identity, never
   trusted from a client-passed param.
