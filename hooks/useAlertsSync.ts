@@ -183,7 +183,7 @@ export function useAlertsSync() {
 
       if (profile.lastSeenAlertsAt === undefined) {
         // First sync ever for this student — baseline to "now" rather than alerting on
-        // the entire pre-existing semesterActivities catalogue.
+        // the entire pre-existing semesterActivities/courseActivities catalogue.
         await updateLastSeenAlertsAt({ lastSeenAlertsAt: now });
       } else {
         const lastSeenAlertsAt = profile.lastSeenAlertsAt;
@@ -197,6 +197,28 @@ export function useAlertsSync() {
             subtitle: event.title,
           });
         }
+
+        // Admin-published course activities (exam timetables in particular, plus any
+        // assignment/quiz/project) get the same "something new was published" alert —
+        // this is the courseActivities equivalent of the semesterActivities case above,
+        // filling the gap where an exam import produced no NEW_EVENT at all. No priority
+        // on these either, matching semesterActivities' NEW_EVENT: institutional news
+        // reads as neutral-good, not a priority level (see AGENTS.md's Alerts feed
+        // section).
+        const newCourseActivities = courseActivitiesData.filter(
+          (activity) => activity._creationTime > lastSeenAlertsAt,
+        );
+        for (const activity of newCourseActivities) {
+          const course = coursesById.get(activity.courseId);
+          await createAlert({
+            entityType: 'courseActivities',
+            entityId: activity._id,
+            kind: 'NEW_EVENT',
+            title: `New ${activity.activityType.toLowerCase()} published`,
+            subtitle: courseSubtitle(course, activity.title),
+          });
+        }
+
         await updateLastSeenAlertsAt({ lastSeenAlertsAt: now });
       }
     };
