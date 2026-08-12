@@ -12,6 +12,7 @@ import type * as ResendOTP from "../ResendOTP.js";
 import type * as academicStructure from "../academicStructure.js";
 import type * as academicYears from "../academicYears.js";
 import type * as activities from "../activities.js";
+import type * as activityCategories from "../activityCategories.js";
 import type * as adminAuth from "../adminAuth.js";
 import type * as adminDashboard from "../adminDashboard.js";
 import type * as admins from "../admins.js";
@@ -48,6 +49,7 @@ declare const fullApi: ApiFromModules<{
   academicStructure: typeof academicStructure;
   academicYears: typeof academicYears;
   activities: typeof activities;
+  activityCategories: typeof activityCategories;
   adminAuth: typeof adminAuth;
   adminDashboard: typeof adminDashboard;
   admins: typeof admins;
