@@ -364,46 +364,74 @@ silently gaining a tap target.
 Pushed from Home's `ProgressCard` (see above) — registered as a sibling of `(tabs)` in
 `app/(protected)/_layout.tsx`, same standing rule every other pushed detail screen
 follows (see "Nested navigation" below), native header with a dynamically-set title
-(`Stack.Screen options={{ title: overview?.year.title }}` set locally in the route
-component, same pattern `activity/[entityId]`'s `headerRight` already uses for
-data the static per-route config in `_layout.tsx` doesn't have).
+(`Stack.Screen options={{ title: view?.title }}`, the semester's own title, set
+locally in the route component, same pattern `activity/[entityId]`'s `headerRight`
+already uses for data the static per-route config in `_layout.tsx` doesn't have).
 
-**Data**: one query, `api.academicYears.getCurrentYearOverview` — see the Backend
-section below. Returns the resolved `academicYears` row plus both its semesters, each
-with its own `semesterActivities`/`personalReminders`/`courseActivities` already
-scoped to the caller. The screen maps each semester's rows through the same
-`lib/activityMapping.ts` mappers Home uses (see `lib/` below), sorts them by
+**Shows one semester at a time, never both semesters of the academic year at once** —
+revised from an earlier version that showed a full academic-year overview by default.
+Defaults to the currently active semester (`api.semesters.getActive`, resolved
+client-side); the three-dot header menu (`headerRight`, see below) lets the student
+browse to any other published semester instead.
+
+**Data**: `api.academicYears.getSemesterOverview({ semesterId })` — see the Backend
+section below. `semesterId` is either the student's explicit pick (the three-dot
+picker) or, when they haven't picked one, whichever semester `api.semesters.getActive`
+currently resolves to (`'skip'`-gated until one of those two is known — see Convex's
+documented conditional-query pattern, used the same way elsewhere in this app, e.g.
+Calendar). Returns the resolved `academicYears` row (shown as a small caption above the
+ring, for context) plus that one semester's `semesterActivities`/`personalReminders`/
+`courseActivities`, already scoped to the caller. The screen maps those rows through
+the same `lib/activityMapping.ts` mappers Home uses (see `lib/` below), sorts them by
 `dueDate`, and renders them via the same `ActivityCard` row every other activity list
 in this app uses — no screen-specific row treatment.
 
-**Layout**, top to bottom:
-- An overall `CircularProgress` ring (`components/shared/CircularProgress.tsx`) showing
-  total completed ÷ total completable across BOTH semesters, plus a one-line summary
-  ("N of M activities completed across the 2025/2026 academic year").
-- One card per semester: title (+ a small "Current" pill for the active one — the same
-  `bg-accent/15` + `text-accent` pairing used elsewhere for a soft, non-alarming tag),
-  its date range, a time-elapsed bar identical in style to Home's `ProgressCard` (via
-  the shared `lib/semesterProgress.ts#computeSemesterProgress` — see `lib/` below), and
-  a completed/total count. The active semester shows "N weeks remaining"; the past one
-  shows "N% of term elapsed" instead (a fully-elapsed past semester reads as 100%, not
-  a negative or nonsensical value — `computeSemesterProgress` already clamps to
-  [0, 100]).
-- That semester's full activity list below its card, tapping through to Activity
-  Details exactly like Home/Calendar's own rows do.
+**Three-dot menu** (`components/features/academic-year/AcademicPeriodPicker.tsx`) — a
+small `Dialog` with a two-step list: every published academic year as a row (tap to
+drill into its semesters), then that year's semesters as rows (tap to view, with a
+"Current" tag on the active one and a checkmark on whichever is already selected), plus
+a "View current semester" shortcut back to the default. Deliberately plain pressable
+rows, not heroui's `Select` — an earlier version nested two `Select` popovers inside
+the `Dialog` and their popover `Portal`s didn't reliably render on top of the Dialog's
+own `Portal` (two competing overlay layers); a flat list avoids that entirely and reads
+more like `ActionSheet`'s row-list menu anyway. When viewing a semester that isn't the
+active one, a small banner above the progress card offers the same "back to current"
+shortcut inline, so switching back doesn't require reopening the menu.
+
+**Layout**, top to bottom: an optional "viewing a different semester" banner, a
+`CircularProgress` ring (`components/shared/CircularProgress.tsx`) for that one
+semester's completed ÷ total, with the academic year's title as a small caption above
+it and a one-line summary below ("N of M activities completed in Semester 1"); the
+semester's own card (title + a "Current" pill when active — the same `bg-accent/15` +
+`text-accent` pairing used elsewhere for a soft, non-alarming tag — date range, a
+time-elapsed bar identical in style to Home's `ProgressCard` via the shared
+`lib/semesterProgress.ts#computeSemesterProgress`, and a completed/total count; the
+active semester shows "N weeks remaining", a past one shows "N% of term elapsed"
+instead since `computeSemesterProgress` already clamps to [0, 100]); then that
+semester's activity list.
+
+**Activity list pagination** — renders `ACTIVITIES_PAGE_SIZE` (5) activities at a time
+with a "Load N more" button below, rather than the full list at once (a semester with
+many activities would otherwise be a very long scroll with no way to gauge length).
+Keyed by the semester's own id at the call site so switching semesters resets the
+visible count back to 5, not carrying over whatever was expanded on the previous one.
 
 **Completion counting**: only `courseActivities` and `personalReminders` count toward
-a semester's completed/total (and the overall ring) — a `semesterActivity` has no
-completion concept (institutional events can't be "done," see AGENTS.md's Priority
-model), so it's excluded from both counts but still rendered in the activity list.
-This is the same exemption Home's own overdue detection already makes for semester
-activities, applied here to completion instead of overdue.
+the semester's completed/total (and the ring) — a `semesterActivity` has no completion
+concept (institutional events can't be "done," see AGENTS.md's Priority model), so it's
+excluded from both counts but still rendered in the activity list. This is the same
+exemption Home's own overdue detection already makes for semester activities, applied
+here to completion instead of overdue.
 
-**Empty/missing states**: a full-screen skeleton while the query is loading (shape-
-matched to the ring + two semester cards, same `HomeSkeleton` pattern as Home); a
-plain centered message ("No active semester right now — check back once one is
-published") when the query resolves to `null` — this can happen with no active
-semester at all, or an active semester that predates the `academicYearId` schema
-field (see Backend section below) — rather than a broken/blank screen either way.
+**Empty/missing states**: a full-screen skeleton while resolving the active semester or
+loading its overview (shape-matched to the ring + semester card, same `HomeSkeleton`
+pattern as Home); "No active semester right now — check back once one is published"
+specifically when there's no active semester AND the student hasn't picked one of their
+own (`api.semesters.getActive` resolves `null`); a softer "That semester hasn't been
+published, or has nothing to show yet" for an explicitly-picked semester that no longer
+resolves (predates `academicYearId`, or was since unpublished) — distinct messages
+because the first is a normal "nothing active yet" state and the second is closer to a
+stale selection, not a broken app either way.
 
 ### Calendar (`app/(protected)/(tabs)/calendar/index.tsx`)
 
@@ -860,16 +888,21 @@ than a parallel `adminProfiles` table. See AGENTS.md's Admin account section for
   `academicClassId`; `courseSections`/`studentProfiles` have none on `divisionId`) are
   full-table scans — same "fine at this app's demo scale, flagged not fixed" posture as
   `courseActivities.ts`/`personalReminders.ts`'s overdue-sweep queries.
-- `academicYears.ts` — `getCurrentYearOverview`, the Academic Year Progress screen's one
-  query. `ctx.auth`-derived, never a client-passed studentId. Resolves the AcademicYear
-  containing the currently-active semester, then gathers both semesters'
-  semesterActivities/personalReminders/courseActivities for the caller — courseActivities
-  has no `semesterId` of its own (it only inherits one through its course, see
-  schema.ts), so this scopes them per semester via each semester's own `courses` rows
-  rather than a direct index lookup. Returns `null` when there's no active semester, or
-  when the active semester predates the `academicYearId` field (see schema.ts) — the
-  screen renders a plain "check back later" message in either case rather than crashing.
-  See "Academic Year Progress" below for the screen this powers.
+- `academicYears.ts` — `getSemesterOverview({ semesterId })`, the Academic Year
+  Progress screen's one query, plus `listAllForSelection` for its three-dot picker.
+  Both `ctx.auth`-derived, never a client-passed studentId. `getSemesterOverview`
+  resolves the given semester's own `academicYears` row and gathers that one
+  semester's semesterActivities/personalReminders/courseActivities for the caller
+  (shared with `buildSemesterBreakdown`, a local helper) — courseActivities has no
+  `semesterId` of its own (it only inherits one through its course, see schema.ts), so
+  this scopes them via that semester's own `courses` rows rather than a direct index
+  lookup. Returns `null` when the semester predates the `academicYearId` field (see
+  schema.ts) or doesn't resolve to a real academic year. `listAllForSelection` returns
+  every academic year with its semesters (id/title/isActive only) for the picker to
+  browse — open to any signed-in caller, same posture as `semesters.ts#list`. Which
+  semester to actually query is resolved client-side (the student's explicit pick, or
+  `semesters.ts#getActive` by default) — this file has no "current" concept of its own
+  anymore. See "Academic Year Progress" below for the screen this powers.
 - `studentProfiles.ts` — `getMyProfile` / `createProfile`, the onboarding-gate table.
   `createProfile`/`updateInstitutionalEmail`'s shared `requireInstitutionalEmailDomain`
   helper resolves against the CALLER'S OWN `institutionId` (opportunistically set at
